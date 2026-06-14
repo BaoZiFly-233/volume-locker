@@ -84,18 +84,18 @@ fn enforce_priority_for_type(
         let device_name = backend.device_by_id(&target_id).map_or_else(
             |e| {
                 log::warn!("Could not get name for device {target_id}: {e:#}");
-                "Unknown Device".to_string()
+                "未知设备".to_string()
             },
             |d| d.name(),
         );
         let title = match device_type {
-            DeviceType::Output => "Default Output Device Restored",
-            DeviceType::Input => "Default Input Device Restored",
+            DeviceType::Output => "默认输出设备已恢复",
+            DeviceType::Input => "默认输入设备已恢复",
         };
         throttler.send_if_not_throttled(
             &format!("priority_restore_{target_id}"),
             title,
-            &format!("Switched to {device_name} based on priority list."),
+            &format!("已根据优先级列表切换到 {device_name}。"),
         );
     }
 }

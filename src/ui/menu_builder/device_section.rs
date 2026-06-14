@@ -48,16 +48,16 @@ pub fn build_device_submenu(
 
     let submenu = Submenu::new(&label, true);
 
-    let volume_lock_item = CheckMenuItem::new("Keep volume locked", true, is_volume_locked, None);
+    let volume_lock_item = CheckMenuItem::new("锁定音量", true, is_volume_locked, None);
     let volume_notify_item = CheckMenuItem::new(
-        "Notify on volume restore",
+        "音量恢复时通知",
         is_volume_locked,
         notify_on_volume_lock,
         None,
     );
-    let unmute_lock_item = CheckMenuItem::new("Keep unmuted", true, is_unmute_locked, None);
+    let unmute_lock_item = CheckMenuItem::new("保持未静音", true, is_unmute_locked, None);
     let unmute_notify_item = CheckMenuItem::new(
-        "Notify on unmute",
+        "取消静音时通知",
         is_unmute_locked,
         notify_on_unmute_lock,
         None,
@@ -84,11 +84,11 @@ pub fn build_device_submenu(
     submenu.append(&unmute_notify_item)?;
     submenu.append(&PredefinedMenuItem::separator())?;
 
-    let properties_item = MenuItem::new("Properties...", true, None);
+    let properties_item = MenuItem::new("属性...", true, None);
     register(properties_item.id().clone(), DeviceAction::OpenProperties);
     submenu.append(&properties_item)?;
 
-    let settings_item = MenuItem::new("Settings...", true, None);
+    let settings_item = MenuItem::new("设置...", true, None);
     register(settings_item.id().clone(), DeviceAction::OpenSettings);
     submenu.append(&settings_item)?;
 
@@ -127,8 +127,8 @@ pub fn append_device_list_to_menu(
     }
 
     let properties_label = match device_type {
-        DeviceType::Output => "Playback devices...",
-        DeviceType::Input => "Recording devices...",
+        DeviceType::Output => "播放设备...",
+        DeviceType::Input => "录音设备...",
     };
     append_action_item(
         tray_menu,

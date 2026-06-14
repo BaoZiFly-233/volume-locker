@@ -81,7 +81,7 @@ fn ensure_writable_directory(executable_directory: &std::path::Path) -> anyhow::
     if !is_directory_writable(executable_directory) {
         let error_title = "Volume Locker Directory Not Writable";
         let error_message = format!(
-            "Please move Volume Locker to a directory that is writable or fix the permissions of '{}'.",
+            "请将 Volume Locker 移动到可写目录，或修复 '{}' 的权限。",
             executable_directory.display(),
         );
         let _ = send_notification(error_title, &error_message, NotificationDuration::Long);
@@ -131,13 +131,12 @@ fn run() -> anyhow::Result<()> {
 
     let auto_launch = create_auto_launch()?;
 
-    let output_devices_heading_item = MenuItem::new("Output devices", false, None);
-    let input_devices_heading_item = MenuItem::new("Input devices", false, None);
-    let auto_launch_check_item: CheckMenuItem =
-        CheckMenuItem::new("Auto-launch on startup", true, false, None);
+    let output_devices_heading_item = MenuItem::new("输出设备", false, None);
+    let input_devices_heading_item = MenuItem::new("输入设备", false, None);
+    let auto_launch_check_item: CheckMenuItem = CheckMenuItem::new("开机自启", true, false, None);
     let check_updates_on_launch_item: CheckMenuItem =
-        CheckMenuItem::new("Check for updates on launch", true, false, None);
-    let quit_item = MenuItem::new("Quit", true, None);
+        CheckMenuItem::new("启动时检查更新", true, false, None);
+    let quit_item = MenuItem::new("退出", true, None);
 
     let tray_menu = Menu::new();
     // At least one item must be added to the menu on initialization, otherwise

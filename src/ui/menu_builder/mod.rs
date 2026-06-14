@@ -85,7 +85,7 @@ fn lookup_device_name(
             Ok(d) => d.name(),
             Err(e) => {
                 log::warn!("Failed to look up device name for {device_id}: {e:#}");
-                "Unknown Device".to_string()
+                "未知设备".to_string()
             }
         }
     }
@@ -134,13 +134,13 @@ pub fn rebuild_tray_menu(
     append_action_item(
         tray_menu,
         &mut map,
-        "Sound settings...",
+        "声音设置...",
         MenuAction::App(AppAction::OpenSoundSettings),
     )?;
     append_action_item(
         tray_menu,
         &mut map,
-        "Volume mixer...",
+        "音量合成器...",
         MenuAction::App(AppAction::OpenVolumeMixer),
     )?;
     tray_menu.append(&PredefinedMenuItem::separator())?;
@@ -185,13 +185,13 @@ fn append_preferences_section(
     items: &TrayMenuItems,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("Preferences", false, None))?;
+    tray_menu.append(&MenuItem::new("偏好设置", false, None))?;
 
     items.auto_launch_check.set_checked(auto_launch_enabled);
     map.insert(
         items.auto_launch_check.id().clone(),
         MenuItemInfo {
-            name: "Auto-launch".to_string(),
+            name: "开机自启".to_string(),
             action: MenuAction::App(AppAction::ToggleAutoLaunch),
         },
     );
@@ -203,7 +203,7 @@ fn append_preferences_section(
     map.insert(
         items.check_updates_on_launch.id().clone(),
         MenuItemInfo {
-            name: "Check updates on launch".to_string(),
+            name: "启动时检查更新".to_string(),
             action: MenuAction::App(AppAction::ToggleCheckUpdatesOnLaunch),
         },
     );
@@ -219,12 +219,12 @@ fn append_footer_section(
     update_info: Option<&UpdateInfo>,
     items: &TrayMenuItems,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("Troubleshooting", false, None))?;
+    tray_menu.append(&MenuItem::new("故障排除", false, None))?;
 
     append_action_item(
         tray_menu,
         map,
-        "Open app folder...",
+        "打开应用文件夹...",
         MenuAction::App(AppAction::OpenAppDirectory),
     )?;
 
@@ -239,10 +239,10 @@ fn append_footer_section(
 
     let (label, action) = match update_info {
         Some(info) => (
-            format!("Update to {}...", info.latest_version),
+            format!("更新到 {}...", info.latest_version),
             AppAction::PerformUpdate,
         ),
-        None => ("Check for updates".to_string(), AppAction::CheckForUpdates),
+        None => ("检查更新".to_string(), AppAction::CheckForUpdates),
     };
 
     append_action_item(tray_menu, map, &label, MenuAction::App(action))?;

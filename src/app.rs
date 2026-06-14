@@ -99,10 +99,7 @@ impl AppState {
 
         if migrations_occurred {
             if let Err(e) = save_state(&self.persistent_state) {
-                log_and_notify_error(
-                    "Failed to Save State",
-                    &format!("Failed to save state after device migration: {e:#}"),
-                );
+                log_and_notify_error("状态保存失败", &format!("设备迁移后保存状态失败：{e:#}"));
             } else {
                 log::info!("Saved state after device migration");
             }
@@ -229,10 +226,7 @@ impl AppState {
 
     pub fn handle_configuration_changed(&mut self, proxy: &EventLoopProxy<UserEvent>) {
         if let Err(e) = save_state(&self.persistent_state) {
-            log_and_notify_error(
-                "Failed to Save State",
-                &format!("Failed to save state: {e:#}"),
-            );
+            log_and_notify_error("状态保存失败", &format!("保存状态失败：{e:#}"));
             return;
         }
         log::info!(
@@ -281,7 +275,7 @@ impl AppState {
                         *control_flow = ControlFlow::Exit;
                     }
                     Err(e) => {
-                        log_and_notify_error("Update Failed", &format!("Update failed: {e:#}"));
+                        log_and_notify_error("更新失败", &format!("更新失败：{e:#}"));
                     }
                 },
                 MenuEventResult::UpdateCheck => {
@@ -295,8 +289,8 @@ impl AppState {
                     };
                     if let Err(e) = result {
                         log_and_notify_error(
-                            "Failed to Toggle Auto-Launch",
-                            &format!("Failed to toggle auto-launch: {e:#}"),
+                            "开机自启切换失败",
+                            &format!("无法切换开机自启：{e:#}"),
                         );
                     }
                 }
@@ -363,10 +357,7 @@ impl AppState {
                 }
             }
             Err(e) => {
-                log_and_notify_error(
-                    "Failed to Rebuild Tray Menu",
-                    &format!("Failed to rebuild tray menu: {e:#}"),
-                );
+                log_and_notify_error("托盘菜单重建失败", &format!("无法重建托盘菜单：{e:#}"));
             }
         }
     }

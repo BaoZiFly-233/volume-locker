@@ -109,9 +109,9 @@ pub fn enforce_volume_lock(
     if lock.notify {
         throttler.send_if_not_throttled(
             &format!("volume_restore_{device_id}"),
-            "Volume Restored",
+            "音量已恢复",
             &format!(
-                "The volume of {device_name} has been restored from {new_volume_percent}% to {target_volume_percent}%."
+                "{device_name} 的音量已从 {new_volume_percent}% 恢复到 {target_volume_percent}%。"
             ),
         );
     }
@@ -119,10 +119,10 @@ pub fn enforce_volume_lock(
 
 fn get_unmute_notification_details(device_type: DeviceType) -> (&'static str, &'static str) {
     let title = match device_type {
-        DeviceType::Input => "Input Device Unmuted",
-        DeviceType::Output => "Output Device Unmuted",
+        DeviceType::Input => "输入设备已取消静音",
+        DeviceType::Output => "输出设备已取消静音",
     };
-    (title, "was unmuted due to Keep unmuted setting.")
+    (title, "已根据「保持未静音」设置取消静音。")
 }
 
 /// Returns a list of `(device_id, new_name, device_type)` tuples for all
@@ -357,15 +357,15 @@ pub(crate) mod tests {
     #[test]
     fn unmute_notification_details_output() {
         let (title, suffix) = get_unmute_notification_details(DeviceType::Output);
-        assert_eq!(title, "Output Device Unmuted");
-        assert!(suffix.contains("unmuted"));
+        assert_eq!(title, "输出设备已取消静音");
+        assert!(suffix.contains("未静音"));
     }
 
     #[test]
     fn unmute_notification_details_input() {
         let (title, suffix) = get_unmute_notification_details(DeviceType::Input);
-        assert_eq!(title, "Input Device Unmuted");
-        assert!(suffix.contains("unmuted"));
+        assert_eq!(title, "输入设备已取消静音");
+        assert!(suffix.contains("未静音"));
     }
 
     // --- Error path tests ---

@@ -79,8 +79,8 @@ fn apply_device_lock_toggle(
                     device_settings.volume_lock.is_locked = true;
                 } else {
                     log_and_notify_error(
-                        "Failed to Lock Volume",
-                        &format!("Failed to get volume for device {device_name}, cannot lock."),
+                        "音量锁定失败",
+                        &format!("无法获取设备 {device_name} 的音量，无法锁定。"),
                     );
                     device_settings.volume_lock.is_locked = false;
                 }

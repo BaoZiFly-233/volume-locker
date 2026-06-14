@@ -84,9 +84,9 @@ pub fn check_for_update(manual_request: bool) -> anyhow::Result<Option<UpdateInf
             log::info!("Update available: v{}", info.latest_version);
             if manual_request
                 && let Err(e) = send_notification(
-                    "Update Available",
+                    "有可用更新",
                     &format!(
-                        "Version {} is available. Click 'Update' in the menu to install.",
+                        "版本 {} 已可用，点击菜单中的「更新」进行安装。",
                         info.latest_version
                     ),
                     NotificationDuration::Long,
@@ -100,8 +100,8 @@ pub fn check_for_update(manual_request: bool) -> anyhow::Result<Option<UpdateInf
             log::info!("No updates available");
             if manual_request
                 && let Err(e) = send_notification(
-                    "No Updates Available",
-                    "You are running the latest version of Volume Locker.",
+                    "无可用更新",
+                    "你正在运行 Volume Locker 的最新版本。",
                     NotificationDuration::Short,
                 )
             {
@@ -111,10 +111,7 @@ pub fn check_for_update(manual_request: bool) -> anyhow::Result<Option<UpdateInf
         }
         Err(e) => {
             if manual_request {
-                log_and_notify_error(
-                    "Update Check Failed",
-                    &format!("Failed to check for updates: {e:#}"),
-                );
+                log_and_notify_error("更新检查失败", &format!("无法检查更新：{e:#}"));
             } else {
                 log::error!("Failed to check for updates: {e:#}");
             }

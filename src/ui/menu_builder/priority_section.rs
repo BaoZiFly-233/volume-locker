@@ -17,15 +17,11 @@ fn build_priority_item_submenu(
     let submenu = Submenu::new(&label, true);
 
     let move_items: [(&str, bool, DeviceAction); 4] = [
-        ("Move up", index > 0, DeviceAction::MovePriorityUp),
+        ("上移", index > 0, DeviceAction::MovePriorityUp),
+        ("下移", index < list_len - 1, DeviceAction::MovePriorityDown),
+        ("移至顶部", index > 0, DeviceAction::MovePriorityToTop),
         (
-            "Move down",
-            index < list_len - 1,
-            DeviceAction::MovePriorityDown,
-        ),
-        ("Move to top", index > 0, DeviceAction::MovePriorityToTop),
-        (
-            "Move to bottom",
+            "移至底部",
             index < list_len - 1,
             DeviceAction::MovePriorityToBottom,
         ),
@@ -47,7 +43,7 @@ fn build_priority_item_submenu(
     }
     submenu.append(&PredefinedMenuItem::separator())?;
 
-    let remove_item = MenuItem::new("Remove device", true, None);
+    let remove_item = MenuItem::new("移除设备", true, None);
     register_menu_item(
         map,
         remove_item.id().clone(),
@@ -71,8 +67,8 @@ pub fn append_priority_list_to_menu(
 ) -> anyhow::Result<()> {
     let priority_list = persistent_state.priority_list(device_type);
     let priority_label = match device_type {
-        DeviceType::Output => "Default output device priority",
-        DeviceType::Input => "Default input device priority",
+        DeviceType::Output => "默认输出设备优先级",
+        DeviceType::Input => "默认输入设备优先级",
     };
 
     let priority_header = MenuItem::new(priority_label, false, None);
@@ -102,7 +98,7 @@ pub fn append_priority_list_to_menu(
         .filter(|(id, _)| !priority_list.contains(id))
         .collect();
 
-    let add_device_submenu = Submenu::new("Add device", !devices_to_add.is_empty());
+    let add_device_submenu = Submenu::new("添加设备", !devices_to_add.is_empty());
     for (id, name) in devices_to_add {
         let item = MenuItem::new(name, true, None);
         register_menu_item(
@@ -120,7 +116,7 @@ pub fn append_priority_list_to_menu(
     let notify_on_restore = persistent_state.notify_on_priority_restore(device_type);
 
     let notify_item = CheckMenuItem::new(
-        "Notify on priority restore",
+        "优先级恢复时通知",
         !priority_list.is_empty() || temporary_priority.is_some(),
         notify_on_restore,
         None,
@@ -141,7 +137,7 @@ pub fn append_priority_list_to_menu(
     let switch_communication = persistent_state.switch_communication_device(device_type);
 
     let switch_comm_item = CheckMenuItem::new(
-        "Also switch default communication device",
+        "同时切换默认通信设备",
         !priority_list.is_empty() || temporary_priority.is_some(),
         switch_communication,
         None,
@@ -171,11 +167,7 @@ pub fn append_temporary_priority_section(
     temporary_priorities: &TemporaryPriorities,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new(
-        "Temporary default device priority",
-        false,
-        None,
-    ))?;
+    tray_menu.append(&MenuItem::new("临时默认设备优先级", false, None))?;
 
     for device_type in [DeviceType::Output, DeviceType::Input] {
         let devices = backend.devices(device_type).unwrap_or_else(|e| {
@@ -187,8 +179,8 @@ pub fn append_temporary_priority_section(
         let temp_id_opt = temporary_priorities.get(device_type);
 
         let label_prefix = match device_type {
-            DeviceType::Output => "Output device",
-            DeviceType::Input => "Input device",
+            DeviceType::Output => "输出设备",
+            DeviceType::Input => "输入设备",
         };
 
         let submenu_label = if let Some(temp_id) = temp_id_opt {
