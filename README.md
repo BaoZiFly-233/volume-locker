@@ -8,7 +8,7 @@
 <img align="right" width="200" alt="Volume Locker" src="https://github.com/user-attachments/assets/80473f4a-f901-440b-9d7b-5003ef1c96c7" />
 
 <p align="center">
-⭐<b>如果本工具对你有帮助，欢迎在 GitHub 上 star 本项目！</b>⭐
+⭐<b>如果本工具对你有帮助，欢迎在 GitHub 上 star 原项目！</b>⭐
 </p>
 
 # Volume Locker
