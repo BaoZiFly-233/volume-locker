@@ -5,15 +5,21 @@ on:
     branches:
       - master
     tags:
-      - v*.*.*
+      # 严格 semver，排除 -zh 后缀的汉化 tag
+      - v[0-9]+.[0-9]+.[0-9]+
   pull_request:
     branches:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write # for release
     env:
@@ -24,17 +30,51 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: mozilla-actions/sccache-action@v0.0.10
+
       - run: cargo fmt --check
       - run: cargo clippy --locked
       - run: cargo test --locked
-      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        shell: bash
+
+      # 版本号替换仅在严格 semver 标签时执行
+      # 使用 pwsh 替代 sed，避免 Windows Git Bash 的兼容性问题
+      - name: Set release version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
-          version="${GITHUB_REF#refs/tags/v}"
-          sed -i "s/^version = \"0.0.0-development\"$/version = \"${version}\"/" Cargo.toml Cargo.lock
-          grep -q "^version = \"${version}\"$" Cargo.toml Cargo.lock
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "Tag '$version' is not valid semver. Aborting to prevent malformed Cargo.toml."
+            exit 1
+          }
+          Write-Host "Setting version to: $version"
+
+          $toml = Get-Content Cargo.toml -Raw
+          $toml = $toml -replace '(?m)^version = "0\.0\.0-development"', "version = ""$version"""
+          Set-Content Cargo.toml -Value $toml -NoNewline
+
+          $lock = Get-Content Cargo.lock -Raw
+          $lock = $lock -replace '(?m)^version = "0\.0\.0-development"', "version = ""$version"""
+          Set-Content Cargo.lock -Value $lock -NoNewline
+
+          if (-not (Select-String -Path Cargo.toml -Pattern "^version = ""$version""`$")) {
+            Write-Error "Version replacement in Cargo.toml failed!"
+            exit 1
+          }
+          if (-not (Select-String -Path Cargo.lock -Pattern "^version = ""$version""`$")) {
+            Write-Error "Version replacement in Cargo.lock failed!"
+            exit 1
+          }
+          Write-Host "Version set successfully"
+
+      # 在 --frozen 构建前预下载依赖，避免缓存失效时构建失败
+      - name: Fetch dependencies
+        run: cargo fetch --locked
+
       - run: cargo build --release --frozen
-      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+      # 仅在严格 semver 标签时创建 Release（-zh 标签已被 tag filter 排除）
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
           make_latest: true

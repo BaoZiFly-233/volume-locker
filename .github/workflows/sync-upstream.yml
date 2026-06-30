@@ -5,11 +5,16 @@ on:
     - cron: '0 0 * * *' # 每天 UTC 0:00
   workflow_dispatch:       # 手动触发
 
+# 防止 cron 和手动触发同时运行导致 git push 竞态
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    permissions: write-all     # contents + pull-requests + workflows（GITHUB_TOKEN 修改 workflow 文件必需）
     steps:
       - name: Checkout fork
         uses: actions/checkout@v6
@@ -29,8 +34,22 @@ jobs:
           git fetch upstream master
           git fetch upstream --tags
 
+      # 上游无新提交则跳过，避免每天空跑浪费 CI 时间
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/master)
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "No new upstream commits, skipping"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found ${BEHIND} new upstream commit(s)"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Merge upstream
         id: merge
+        if: steps.check.outputs.has_changes == 'true'
         run: |
           if git merge upstream/master --no-edit; then
             echo "merged=true" >> "$GITHUB_OUTPUT"
@@ -39,38 +58,78 @@ jobs:
           fi
         continue-on-error: true
 
+      # 合并后回退 workflow 文件到 fork 版本，避免 GITHUB_TOKEN 因修改 workflow 被拒
+      - name: Keep fork workflow files
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          git checkout HEAD^ -- .github/workflows/
+          git commit --amend --no-edit
+
       - name: Push merged changes
         if: steps.merge.outputs.merged == 'true'
         run: git push origin master
 
-      - name: Auto-tag and release
+      # 注意：GITHUB_TOKEN 推送的 tag 默认不触发其他 workflow
+      - name: Auto-tag with -zh suffix
         if: steps.merge.outputs.merged == 'true'
         run: |
-          LATEST=$(git ls-remote --tags upstream 'refs/tags/v[0-9]*' \
+          LATEST=$(git ls-remote --tags upstream 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' \
             | sed 's|.*refs/tags/||' \
             | sort -V \
             | tail -1)
           if [ -z "$LATEST" ]; then
-            echo "No upstream version tags found, skipping"
+            echo "No upstream semver tags found, skipping"
             exit 0
           fi
-          ZH_TAG="${LATEST}-zh"
+          echo "Latest upstream tag: ${LATEST}"
+
+          # 剥离已有的 -zh 后缀，防止产生 v1.2.3-zh-zh
+          LATEST_BASE="${LATEST%-zh}"
+          ZH_TAG="${LATEST_BASE}-zh"
+
           if git ls-remote --tags origin "refs/tags/${ZH_TAG}" | grep -q .; then
             echo "Tag ${ZH_TAG} already exists, skipping"
           else
-            echo "Creating tag ${ZH_TAG} from upstream ${LATEST}"
+            echo "Creating tag ${ZH_TAG}"
             git tag "${ZH_TAG}"
             git push origin "${ZH_TAG}"
           fi
 
+      # 放弃失败的合并，清理工作树中的冲突标记
+      - name: Abort failed merge
+        if: steps.merge.outputs.merged == 'false'
+        run: git merge --abort
+
+      # 将 upstream/master 直接推到一个独立分支，作为 PR 的源
+      - name: Push upstream to PR branch
+        if: steps.merge.outputs.merged == 'false'
+        run: |
+          git push origin upstream/master:refs/heads/upstream-sync --force
+
       - name: Create PR for conflicts
         if: steps.merge.outputs.merged == 'false'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          title: "🔄 同步上游更新 (有冲突需手动处理)"
-          body: |
-            上游仓库 [felipecrs/volume-locker](https://github.com/felipecrs/volume-locker) 有新的提交。
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 避免重复创建 PR
+          if gh pr list --head upstream-sync --state open --json number -q '.[0].number' | grep -q .; then
+            echo "An open PR for upstream-sync already exists, skipping"
+            exit 0
+          fi
+          gh pr create \
+            --title "🔄 同步上游更新 (有冲突需手动处理)" \
+            --body "上游仓库 [felipecrs/volume-locker](https://github.com/felipecrs/volume-locker) 有新的提交。
 
-            **自动合并失败**，存在冲突需要手动解决。请 `git checkout upstream-sync` 并解决冲突后合并。
-          branch: upstream-sync
-          base: master
+          **自动合并失败**，存在冲突需要手动解决。
+
+          手动处理步骤：
+
+          \`\`\`bash
+          git checkout master
+          git pull origin master
+          git merge upstream/master
+          # 解决冲突后
+          git push origin master
+          \`\`\`" \
+            --base master \
+            --head upstream-sync
