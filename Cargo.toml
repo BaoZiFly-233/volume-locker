@@ -21,41 +21,28 @@ name = "VolumeLocker"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 auto-launch = "0.6.0"
 dunce = "1.0.5"
 
-log = "0.4.29"
-notify-rust = "4.17.0"
-open = "5.3.5"
+log = "0.4.34"
+notify-rust = "4.18.0"
+open = "5.4.4"
 regex-lite = "0.1.9"
 semver = "1.0.28"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
 simplelog = "0.12.2"
 
-tao = "0.35.2"
-tray-icon = "0.24.0"
-ureq = { version = "3.3.0", default-features = false, features = [
+tao = "0.37.1"
+tray-icon = "0.25.1"
+ureq = { version = "3.4.2", default-features = false, features = [
 	"native-tls",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-registry = "0.6.1"
-windows-core = "0.62.2"
-windows = { version = "0.62.2", features = [
-	"Win32_Devices_FunctionDiscovery",
-	"Win32_Foundation",
-	"Win32_Media_Audio",
-	"Win32_Media_Audio_Endpoints",
-	"Win32_System_Com",
-	"Win32_System_Com_StructuredStorage",
-	"Win32_System_Variant",
-	"Win32_UI_Shell_PropertiesSystem",
-	"Win32_Security",
-	"Win32_System_Threading",
-	"Devices_Custom",
-] }
+windows-registry = "0.100.0"
+windows-core = "0.100.0"
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1.31"
@@ -69,3 +56,4 @@ panic = "abort"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+windows-bindgen = "0.100.0"

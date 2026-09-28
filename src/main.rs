@@ -5,6 +5,15 @@
 
 mod app;
 mod audio;
+#[cfg(target_os = "windows")]
+#[allow(
+    dead_code,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    clippy::all
+)]
+mod bindings;
 mod config;
 mod consts;
 mod notification;
@@ -79,7 +88,7 @@ fn setup_logging(executable_directory: &std::path::Path) -> anyhow::Result<()> {
 
 fn ensure_writable_directory(executable_directory: &std::path::Path) -> anyhow::Result<()> {
     if !is_directory_writable(executable_directory) {
-        let error_title = "Volume Locker Directory Not Writable";
+        let error_title = "Volume Locker 目录不可写";
         let error_message = format!(
             "请将 Volume Locker 移动到可写目录，或修复 '{}' 的权限。",
             executable_directory.display(),
@@ -179,6 +188,7 @@ fn run() -> anyhow::Result<()> {
         notification_throttler: NotificationThrottler::new(),
         temporary_priorities: TemporaryPriorities::default(),
         update_info: None,
+        update_check_in_progress: false,
         tray_icon: None,
         backend,
     };
@@ -225,6 +235,13 @@ fn run() -> anyhow::Result<()> {
 
             Event::UserEvent(UserEvent::ConfigurationChanged) => {
                 app.handle_configuration_changed(&main_proxy);
+            }
+
+            Event::UserEvent(UserEvent::UpdateCheckCompleted {
+                manual_request,
+                result,
+            }) => {
+                app.handle_update_check_completed(manual_request, result);
             }
 
             _ => {}
