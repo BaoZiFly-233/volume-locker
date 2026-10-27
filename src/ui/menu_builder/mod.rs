@@ -181,13 +181,13 @@ fn append_preferences_section(
     items: &TrayMenuItems,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("偏好设置", false, None))?;
+    tray_menu.append(&MenuItem::new("首选项", false, None))?;
 
     items.auto_launch_check.set_checked(auto_launch_enabled);
     map.insert(
         items.auto_launch_check.id().clone(),
         MenuItemInfo {
-            name: "开机自启".to_string(),
+            name: "登录时自动启动".to_string(),
             action: MenuAction::App(AppAction::ToggleAutoLaunch),
         },
     );
@@ -215,7 +215,7 @@ fn append_footer_section(
     update_info: Option<&UpdateInfo>,
     items: &TrayMenuItems,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("故障排除", false, None))?;
+    tray_menu.append(&MenuItem::new("疑难解答", false, None))?;
 
     append_action_item(
         tray_menu,

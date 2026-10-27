@@ -100,7 +100,7 @@ impl AppState {
 
         if migrations_occurred {
             if let Err(e) = save_state(&self.persistent_state) {
-                log_and_notify_error("状态保存失败", &format!("设备迁移后保存状态失败：{e:#}"));
+                log_and_notify_error("保存状态失败", &format!("设备迁移后无法保存状态：{e:#}"));
             } else {
                 log::info!("Saved state after device migration");
             }
@@ -255,7 +255,7 @@ impl AppState {
 
     pub fn handle_configuration_changed(&mut self, proxy: &EventLoopProxy<UserEvent>) {
         if let Err(e) = save_state(&self.persistent_state) {
-            log_and_notify_error("状态保存失败", &format!("保存状态失败：{e:#}"));
+            log_and_notify_error("保存状态失败", &format!("无法保存状态：{e:#}"));
             return;
         }
         log::info!(
@@ -318,8 +318,8 @@ impl AppState {
                     };
                     if let Err(e) = result {
                         log_and_notify_error(
-                            "开机自启切换失败",
-                            &format!("无法切换开机自启：{e:#}"),
+                            "自动启动切换失败",
+                            &format!("无法切换自动启动：{e:#}"),
                         );
                     }
                 }

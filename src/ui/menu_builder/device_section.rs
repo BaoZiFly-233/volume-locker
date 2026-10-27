@@ -52,7 +52,7 @@ pub fn build_device_submenu(
         notify_on_volume_lock,
         None,
     );
-    let unmute_lock_item = CheckMenuItem::new("保持未静音", true, is_unmute_locked, None);
+    let unmute_lock_item = CheckMenuItem::new("保持不静音", true, is_unmute_locked, None);
     let unmute_notify_item = CheckMenuItem::new(
         "取消静音时通知",
         is_unmute_locked,
@@ -114,7 +114,7 @@ pub fn append_device_list_to_menu(
 
     let properties_label = match device_type {
         DeviceType::Output => "播放设备...",
-        DeviceType::Input => "录音设备...",
+        DeviceType::Input => "录制设备...",
     };
     append_action_item(
         tray_menu,

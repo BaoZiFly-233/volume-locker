@@ -122,7 +122,7 @@ fn get_unmute_notification_details(device_type: DeviceType) -> (&'static str, &'
         DeviceType::Input => "输入设备已取消静音",
         DeviceType::Output => "输出设备已取消静音",
     };
-    (title, "已根据「保持未静音」设置取消静音。")
+    (title, "已根据「保持不静音」设置取消静音。")
 }
 
 /// Returns a list of `(device_id, new_name, device_type)` tuples for all
@@ -358,14 +358,14 @@ pub(crate) mod tests {
     fn unmute_notification_details_output() {
         let (title, suffix) = get_unmute_notification_details(DeviceType::Output);
         assert_eq!(title, "输出设备已取消静音");
-        assert!(suffix.contains("未静音"));
+        assert!(suffix.contains("不静音"));
     }
 
     #[test]
     fn unmute_notification_details_input() {
         let (title, suffix) = get_unmute_notification_details(DeviceType::Input);
         assert_eq!(title, "输入设备已取消静音");
-        assert!(suffix.contains("未静音"));
+        assert!(suffix.contains("不静音"));
     }
 
     // --- Error path tests ---

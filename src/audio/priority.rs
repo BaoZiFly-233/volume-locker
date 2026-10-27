@@ -158,8 +158,8 @@ fn notify_priority_restored(
     let title = match (device_type, kind) {
         (DeviceType::Output, PriorityKind::Main) => "默认输出设备已恢复",
         (DeviceType::Input, PriorityKind::Main) => "默认输入设备已恢复",
-        (DeviceType::Output, PriorityKind::Communication) => "输出通信设备已恢复",
-        (DeviceType::Input, PriorityKind::Communication) => "输入通信设备已恢复",
+        (DeviceType::Output, PriorityKind::Communication) => "通信输出设备已恢复",
+        (DeviceType::Input, PriorityKind::Communication) => "通信输入设备已恢复",
     };
     let throttle_key = match kind {
         PriorityKind::Main => format!("priority_restore_{target_id}"),

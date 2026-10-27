@@ -142,7 +142,8 @@ fn run() -> anyhow::Result<()> {
 
     let output_devices_heading_item = MenuItem::new("输出设备", false, None);
     let input_devices_heading_item = MenuItem::new("输入设备", false, None);
-    let auto_launch_check_item: CheckMenuItem = CheckMenuItem::new("开机自启", true, false, None);
+    let auto_launch_check_item: CheckMenuItem =
+        CheckMenuItem::new("登录时自动启动", true, false, None);
     let check_updates_on_launch_item: CheckMenuItem =
         CheckMenuItem::new("启动时检查更新", true, false, None);
     let quit_item = MenuItem::new("退出", true, None);
