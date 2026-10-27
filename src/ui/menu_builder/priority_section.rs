@@ -34,11 +34,7 @@ fn build_priority_item_submenu(
             index < list_len - 1,
             DeviceAction::MovePriorityDown(kind),
         ),
-        (
-            "移至顶部",
-            index > 0,
-            DeviceAction::MovePriorityToTop(kind),
-        ),
+        ("移至顶部", index > 0, DeviceAction::MovePriorityToTop(kind)),
         (
             "移至底部",
             index < list_len - 1,
@@ -273,17 +269,9 @@ pub fn append_temporary_priority_section(
 
     let targets = [
         (DeviceType::Output, PriorityKind::Main, "输出"),
-        (
-            DeviceType::Output,
-            PriorityKind::Communication,
-            "通信",
-        ),
+        (DeviceType::Output, PriorityKind::Communication, "通信"),
         (DeviceType::Input, PriorityKind::Main, "输入"),
-        (
-            DeviceType::Input,
-            PriorityKind::Communication,
-            "通信",
-        ),
+        (DeviceType::Input, PriorityKind::Communication, "通信"),
     ];
 
     for (device_type, kind, label_prefix) in targets {
@@ -296,7 +284,7 @@ pub fn append_temporary_priority_section(
 
         let submenu_label = if let Some(temp_id) = temp_id_opt {
             let device_name = lookup_device_name(temp_id, persistent_state, backend);
-            format!("{label_prefix}: {device_name}")
+            format!("{label_prefix}：{device_name}")
         } else {
             label_prefix.to_string()
         };
@@ -501,11 +489,8 @@ mod tests {
         let items = menu.items();
         assert_eq!(items[0].as_menuitem().unwrap().text(), "临时优先级");
 
-        assert_eq!(items[1].as_submenu().unwrap().text(), "输出: Speakers");
-        assert_eq!(
-            items[2].as_submenu().unwrap().text(),
-            "通信: Headset"
-        );
+        assert_eq!(items[1].as_submenu().unwrap().text(), "输出：Speakers");
+        assert_eq!(items[2].as_submenu().unwrap().text(), "通信：Headset");
         assert_eq!(items[3].as_submenu().unwrap().text(), "输入");
         assert_eq!(items[4].as_submenu().unwrap().text(), "通信");
 
