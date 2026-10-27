@@ -15,7 +15,7 @@
 
 你是否受够了应用程序未经同意就擅自更改麦克风音量？或者 Windows 总是自动切换到错误的音频设备？
 
-Volume Locker 是一款托盘图标应用，可以锁定音频设备的音量，并根据优先级列表管理默认音频设备。它是一个基于 Rust 编写的 Windows 便携程序，体积约 1MB，绿色免安装。
+Volume Locker 是一款托盘图标应用，可以锁定音频设备的音量，并根据优先级列表管理音频与通信设备。它是一个基于 Rust 编写的 Windows 便携程序，体积约 1MB，绿色免安装。
 
 从此再也不用担心麦克风音量或默认设备被意外更改！
 
@@ -45,9 +45,9 @@ New-Item -ItemType Directory -Path 'C:\Apps\Volume Locker' -Force >$null; `
 
 1.  **Output devices（输出设备）**：所有已激活的输出设备列表。
 2.  **Input devices（输入设备）**：所有已激活的输入设备列表。
-3.  **Default output device priority（默认输出设备优先级）**：管理默认输出设备的优先级列表。
-4.  **Default input device priority（默认输入设备优先级）**：管理默认输入设备的优先级列表。
-5.  **Temporary default device priority（临时默认设备优先级）**：临时覆盖默认设备优先级。
+3.  **Output device priority（输出设备优先级）**：管理输出与通信音频的优先级。
+4.  **Input device priority（输入设备优先级）**：管理输入与通信麦克风的优先级。
+5.  **Temporary priority（临时优先级）**：为任意音频角色提供便捷的临时覆盖。
 
 ### 锁定音量与静音状态
 
@@ -59,25 +59,33 @@ New-Item -ItemType Directory -Path 'C:\Apps\Volume Locker' -Force >$null; `
 4.  勾选 **Keep unmuted（保持非静音）**，防止设备被静音。
 5.  你还可以为这些操作启用通知。
 
-### 默认设备优先级
+### 设备优先级
 
-Volume Locker 可以根据优先级列表自动切换默认音频设备。如果你有多个设备（例如扬声器和耳机），并希望确保在可用时始终使用某个特定设备，此功能非常实用。
+Volume Locker 可以根据优先级列表自动切换音频设备。
 
-1.  导航至 **Default output device priority（默认输出设备优先级）** 或 **Default input device priority（默认输入设备优先级）**。
-2.  选择 **Add device（添加设备）** 将设备加入优先级列表。
-3.  使用 **Move Up（上移）** 和 **Move Down（下移）** 调整优先级顺序。列表顶部的设备优先级最高。
-4.  Volume Locker 会持续监控你的设备，并自动将默认设备切换为优先级最高的可用设备。
-5.  勾选 **Notify on restore（恢复时通知）**，在默认设备被切换时收到通知。
-6.  勾选 **Also switch default communication device（同时切换默认通信设备）**，一并切换默认通信设备。
+1.  在托盘菜单中导航至 **Output device priority（输出设备优先级）** 或 **Input device priority（输入设备优先级）**。当前激活的设备显示在 **Current: <device>（当前）** 下。
+2.  打开 **Device priority settings（设备优先级设置）** 管理优先级列表：
+    - 勾选 **Notify on restore（恢复时通知）**，在根据优先级切换设备时收到通知。
+    - 使用 **Move up（上移）** 和 **Move down（下移）** 调整设备顺序。最顶部的设备优先级最高。
+    - 在 **Add device（添加设备）** 下选择设备，然后选 **Add to top（添加到顶部）** 或 **Add to bottom（添加到底部）**。
+3.  打开 **Communication priority settings（通信优先级设置）** 配置通信设备的切换。
 
-### 临时默认设备优先级
+### 通信优先级设置
 
-如果你希望临时使用其他设备而又不想更改优先级列表（例如在耳机已连接的情况下临时切换到扬声器进行通话），可以使用 **Temporary default device priority（临时默认设备优先级）** 功能。
+输出和输入各自支持独立的通信优先级列表，用于语音通话和聊天软件。
 
-1.  导航至 **Temporary default device priority（临时默认设备优先级）**。
-2.  选择 **Output device（输出设备）** 或 **Input device（输入设备）**。
-3.  选择你希望临时使用的设备。
-4.  该设备将被视作最高优先级设备，直至你取消选中或重启应用。
+1.  在输出或输入下打开 **Communication priority settings（通信优先级设置）**。
+2.  默认情况下，通信设备跟随主优先级列表（**Output device priority（输出设备优先级）** 或 **Input device priority（输入设备优先级）**）。
+3.  你可以调整优先级顺序、添加优先于「跟随主列表」的特定设备，或移除「主优先级」条目。
+4.  在通信优先级设置中勾选 **Notify on restore（恢复时通知）**，在通信设备切换时收到通知。
+
+### 临时优先级
+
+在不更改已保存的优先级列表的情况下，将音频临时路由到指定设备：
+
+1.  在托盘菜单中打开 **Temporary priority（临时优先级）**。
+2.  选择目标角色：**Output（输出）**、**Communication（通信）**、**Input（输入）** 或 **Communication（通信）**。子菜单标签会显示当前选中的设备。
+3.  选择要临时使用的设备。在你取消勾选或应用重启之前，该设置保持有效。临时的通信覆盖优先于已配置的通信优先级。
 
 ## 致谢
 

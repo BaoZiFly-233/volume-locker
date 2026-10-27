@@ -3,7 +3,7 @@ mod persistence;
 pub use persistence::{load_state, save_state};
 
 use crate::types::DeviceSettings;
-use crate::types::{DeviceId, DeviceType};
+use crate::types::{DeviceId, DeviceType, PriorityKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -11,8 +11,12 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PerTypeSettings {
     pub priority_list: Vec<DeviceId>,
+    /// Independent priority list for the Communications role. May contain
+    /// normal device IDs as well as [`DeviceId::main_priority()`], which
+    /// dynamically follows whatever device the main priority resolves to.
+    pub communication_priority_list: Vec<DeviceId>,
     pub notify_on_priority_restore: bool,
-    pub switch_communication_device: bool,
+    pub communication_notify_on_priority_restore: bool,
 }
 
 /// Flat serde representation for backward-compatible JSON serialization.
@@ -23,8 +27,12 @@ struct PersistentStateFlat {
     devices: HashMap<DeviceId, DeviceSettings>,
     output_priority_list: Vec<DeviceId>,
     input_priority_list: Vec<DeviceId>,
+    output_communication_priority_list: Vec<DeviceId>,
+    input_communication_priority_list: Vec<DeviceId>,
     notify_on_priority_restore_output: bool,
     notify_on_priority_restore_input: bool,
+    notify_on_priority_restore_output_communication: bool,
+    notify_on_priority_restore_input_communication: bool,
     switch_communication_device_output: bool,
     switch_communication_device_input: bool,
     check_updates_on_launch: bool,
@@ -39,17 +47,37 @@ impl Default for PersistentStateFlat {
 
 impl From<PersistentStateFlat> for PersistentState {
     fn from(flat: PersistentStateFlat) -> Self {
+        let output_comm = if flat.output_communication_priority_list.is_empty()
+            && flat.switch_communication_device_output
+        {
+            vec![DeviceId::main_priority()]
+        } else {
+            flat.output_communication_priority_list
+        };
+
+        let input_comm = if flat.input_communication_priority_list.is_empty()
+            && flat.switch_communication_device_input
+        {
+            vec![DeviceId::main_priority()]
+        } else {
+            flat.input_communication_priority_list
+        };
+
         Self {
             devices: flat.devices,
             output: PerTypeSettings {
                 priority_list: flat.output_priority_list,
+                communication_priority_list: output_comm,
                 notify_on_priority_restore: flat.notify_on_priority_restore_output,
-                switch_communication_device: flat.switch_communication_device_output,
+                communication_notify_on_priority_restore: flat
+                    .notify_on_priority_restore_output_communication,
             },
             input: PerTypeSettings {
                 priority_list: flat.input_priority_list,
+                communication_priority_list: input_comm,
                 notify_on_priority_restore: flat.notify_on_priority_restore_input,
-                switch_communication_device: flat.switch_communication_device_input,
+                communication_notify_on_priority_restore: flat
+                    .notify_on_priority_restore_input_communication,
             },
             check_updates_on_launch: flat.check_updates_on_launch,
         }
@@ -58,14 +86,33 @@ impl From<PersistentStateFlat> for PersistentState {
 
 impl From<PersistentState> for PersistentStateFlat {
     fn from(state: PersistentState) -> Self {
+        let switch_comm_out = state
+            .output
+            .communication_priority_list
+            .iter()
+            .any(|id| id.is_main_priority());
+        let switch_comm_in = state
+            .input
+            .communication_priority_list
+            .iter()
+            .any(|id| id.is_main_priority());
+
         Self {
             devices: state.devices,
             output_priority_list: state.output.priority_list,
             input_priority_list: state.input.priority_list,
+            output_communication_priority_list: state.output.communication_priority_list,
+            input_communication_priority_list: state.input.communication_priority_list,
             notify_on_priority_restore_output: state.output.notify_on_priority_restore,
             notify_on_priority_restore_input: state.input.notify_on_priority_restore,
-            switch_communication_device_output: state.output.switch_communication_device,
-            switch_communication_device_input: state.input.switch_communication_device,
+            notify_on_priority_restore_output_communication: state
+                .output
+                .communication_notify_on_priority_restore,
+            notify_on_priority_restore_input_communication: state
+                .input
+                .communication_notify_on_priority_restore,
+            switch_communication_device_output: switch_comm_out,
+            switch_communication_device_input: switch_comm_in,
             check_updates_on_launch: state.check_updates_on_launch,
         }
     }
@@ -103,20 +150,62 @@ impl PersistentState {
         &mut self.per_type_mut(device_type).priority_list
     }
 
-    pub fn notify_on_priority_restore(&self, device_type: DeviceType) -> bool {
-        self.per_type(device_type).notify_on_priority_restore
+    pub fn communication_priority_list(&self, device_type: DeviceType) -> &[DeviceId] {
+        &self.per_type(device_type).communication_priority_list
     }
 
-    pub fn set_notify_on_priority_restore(&mut self, device_type: DeviceType, value: bool) {
-        self.per_type_mut(device_type).notify_on_priority_restore = value;
+    pub fn communication_priority_list_mut(
+        &mut self,
+        device_type: DeviceType,
+    ) -> &mut Vec<DeviceId> {
+        &mut self.per_type_mut(device_type).communication_priority_list
     }
 
-    pub fn switch_communication_device(&self, device_type: DeviceType) -> bool {
-        self.per_type(device_type).switch_communication_device
+    pub fn priority_list_of(&self, device_type: DeviceType, kind: PriorityKind) -> &[DeviceId] {
+        match kind {
+            PriorityKind::Main => self.priority_list(device_type),
+            PriorityKind::Communication => self.communication_priority_list(device_type),
+        }
     }
 
-    pub fn set_switch_communication_device(&mut self, device_type: DeviceType, value: bool) {
-        self.per_type_mut(device_type).switch_communication_device = value;
+    pub fn priority_list_of_mut(
+        &mut self,
+        device_type: DeviceType,
+        kind: PriorityKind,
+    ) -> &mut Vec<DeviceId> {
+        match kind {
+            PriorityKind::Main => self.priority_list_mut(device_type),
+            PriorityKind::Communication => self.communication_priority_list_mut(device_type),
+        }
+    }
+
+    pub fn notify_on_priority_restore_of(
+        &self,
+        device_type: DeviceType,
+        kind: PriorityKind,
+    ) -> bool {
+        match kind {
+            PriorityKind::Main => self.per_type(device_type).notify_on_priority_restore,
+            PriorityKind::Communication => {
+                self.per_type(device_type)
+                    .communication_notify_on_priority_restore
+            }
+        }
+    }
+
+    pub fn set_notify_on_priority_restore_of(
+        &mut self,
+        device_type: DeviceType,
+        kind: PriorityKind,
+        value: bool,
+    ) {
+        match kind {
+            PriorityKind::Main => self.per_type_mut(device_type).notify_on_priority_restore = value,
+            PriorityKind::Communication => {
+                self.per_type_mut(device_type)
+                    .communication_notify_on_priority_restore = value;
+            }
+        }
     }
 
     pub fn device_settings(&self, device_id: &DeviceId) -> Option<&DeviceSettings> {
@@ -165,6 +254,9 @@ impl PersistentState {
     /// Removes a device's settings entry if it has no active locks/notifications
     /// and is not referenced by any priority list.
     pub fn remove_device_if_unused(&mut self, device_id: &DeviceId) {
+        if device_id.is_main_priority() {
+            return;
+        }
         let is_prunable = self
             .devices
             .get(device_id)
@@ -172,8 +264,9 @@ impl PersistentState {
         if !is_prunable {
             return;
         }
-        let in_priority = self.output.priority_list.contains(device_id)
-            || self.input.priority_list.contains(device_id);
+        let in_priority = [&self.output, &self.input].iter().any(|s| {
+            s.priority_list.contains(device_id) || s.communication_priority_list.contains(device_id)
+        });
         if !in_priority {
             self.devices.remove(device_id);
         }
@@ -185,11 +278,11 @@ impl Default for PersistentState {
         Self {
             devices: HashMap::default(),
             output: PerTypeSettings {
-                switch_communication_device: true,
+                communication_priority_list: vec![DeviceId::main_priority()],
                 ..PerTypeSettings::default()
             },
             input: PerTypeSettings {
-                switch_communication_device: true,
+                communication_priority_list: vec![DeviceId::main_priority()],
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: true,
@@ -214,8 +307,14 @@ mod tests {
         assert!(state.input.priority_list.is_empty());
         assert!(!state.output.notify_on_priority_restore);
         assert!(!state.input.notify_on_priority_restore);
-        assert!(state.output.switch_communication_device);
-        assert!(state.input.switch_communication_device);
+        assert_eq!(
+            state.output.communication_priority_list,
+            vec![DeviceId::main_priority()]
+        );
+        assert_eq!(
+            state.input.communication_priority_list,
+            vec![DeviceId::main_priority()]
+        );
         assert!(state.check_updates_on_launch);
     }
 
@@ -263,6 +362,94 @@ mod tests {
     }
 
     #[test]
+    fn communication_priority_list_roundtrips() {
+        let state = PersistentState {
+            output: PerTypeSettings {
+                priority_list: vec!["speakers".into()],
+                communication_priority_list: vec!["headset".into()],
+                ..PerTypeSettings::default()
+            },
+            input: PerTypeSettings {
+                communication_priority_list: vec!["mic_usb".into()],
+                ..PerTypeSettings::default()
+            },
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("output_communication_priority_list"));
+
+        let loaded: PersistentState = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.output.priority_list, vec!["speakers"]);
+        assert_eq!(loaded.output.communication_priority_list, vec!["headset"]);
+        assert_eq!(loaded.input.communication_priority_list, vec!["mic_usb"]);
+    }
+
+    #[test]
+    fn legacy_config_without_communication_lists_still_loads() {
+        // A state file written by a version predating the feature.
+        let json = r#"{
+            "devices": {},
+            "output_priority_list": ["speakers"],
+            "switch_communication_device_output": true
+        }"#;
+        let state: PersistentState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.output.priority_list, vec!["speakers"]);
+        assert_eq!(
+            state.output.communication_priority_list,
+            vec![DeviceId::main_priority()]
+        );
+    }
+
+    #[test]
+    fn priority_list_of_selects_the_requested_list() {
+        let mut state = PersistentState::default();
+        state
+            .priority_list_of_mut(DeviceType::Output, PriorityKind::Main)
+            .push("main".into());
+        *state.priority_list_of_mut(DeviceType::Output, PriorityKind::Communication) =
+            vec!["comm".into()];
+        state
+            .priority_list_of_mut(DeviceType::Input, PriorityKind::Communication)
+            .clear();
+
+        assert_eq!(
+            state.priority_list_of(DeviceType::Output, PriorityKind::Main),
+            &["main"]
+        );
+        assert_eq!(
+            state.priority_list_of(DeviceType::Output, PriorityKind::Communication),
+            &["comm"]
+        );
+        assert!(
+            state
+                .priority_list_of(DeviceType::Input, PriorityKind::Communication)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn device_kept_while_referenced_by_communication_list() {
+        let mut state = PersistentState::default();
+        state.devices.insert(
+            "dev1".into(),
+            DeviceSettings::new("Headset".into(), DeviceType::Output),
+        );
+        state
+            .communication_priority_list_mut(DeviceType::Output)
+            .push("dev1".into());
+
+        state.remove_device_if_unused(&"dev1".into());
+        assert!(state.devices.contains_key("dev1"));
+
+        state
+            .communication_priority_list_mut(DeviceType::Output)
+            .clear();
+        state.remove_device_if_unused(&"dev1".into());
+        assert!(!state.devices.contains_key("dev1"));
+    }
+
+    #[test]
     fn get_priority_list_returns_correct_type() {
         let state = PersistentState {
             output: PerTypeSettings {
@@ -297,19 +484,16 @@ mod tests {
     #[test]
     fn notify_on_priority_restore_accessors() {
         let mut state = PersistentState::default();
-        assert!(!state.notify_on_priority_restore(DeviceType::Output));
-        state.set_notify_on_priority_restore(DeviceType::Output, true);
-        assert!(state.notify_on_priority_restore(DeviceType::Output));
-        assert!(!state.notify_on_priority_restore(DeviceType::Input));
-    }
-
-    #[test]
-    fn switch_communication_device_accessors() {
-        let mut state = PersistentState::default();
-        assert!(state.switch_communication_device(DeviceType::Input));
-        state.set_switch_communication_device(DeviceType::Input, false);
-        assert!(!state.switch_communication_device(DeviceType::Input));
-        assert!(state.switch_communication_device(DeviceType::Output));
+        assert!(!state.notify_on_priority_restore_of(DeviceType::Output, PriorityKind::Main));
+        assert!(
+            !state.notify_on_priority_restore_of(DeviceType::Output, PriorityKind::Communication)
+        );
+        state.set_notify_on_priority_restore_of(DeviceType::Output, PriorityKind::Main, true);
+        assert!(state.notify_on_priority_restore_of(DeviceType::Output, PriorityKind::Main));
+        assert!(
+            !state.notify_on_priority_restore_of(DeviceType::Output, PriorityKind::Communication)
+        );
+        assert!(!state.notify_on_priority_restore_of(DeviceType::Input, PriorityKind::Main));
     }
 
     #[test]
@@ -327,7 +511,7 @@ mod tests {
             },
             input: PerTypeSettings {
                 priority_list: vec!["mic_1".into()],
-                switch_communication_device: false,
+                communication_priority_list: vec![],
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: false,
@@ -360,7 +544,7 @@ mod tests {
         assert_eq!(loaded.output.priority_list, vec!["dev_a", "dev_b"]);
         assert_eq!(loaded.input.priority_list, vec!["mic_1"]);
         assert!(loaded.output.notify_on_priority_restore);
-        assert!(!loaded.input.switch_communication_device);
+        assert!(loaded.input.communication_priority_list.is_empty());
         assert!(!loaded.check_updates_on_launch);
 
         let dev = loaded.devices.get("dev_a").unwrap();

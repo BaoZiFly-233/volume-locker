@@ -25,60 +25,44 @@ jobs:
       contents: write # for release
     env:
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
-      - uses: mozilla-actions/sccache-action@v0.0.11
-      - run: cargo fmt --check
-      - run: cargo clippy --locked
-      - run: cargo test --locked
+      - uses: jdx/mise-action@v5
+      - uses: jdx/mr-boxington-action@v1
+      - run: mise run fmt
+      - run: mise run lint
+      - run: mise run test
 
       # 版本号替换：tag 形如 v1.2.3（上游）或 v1.2.3-zh（本仓库汉化）。
       # 汉化 tag 的构建产物版本号取基础 semver，-zh 只体现在 tag/Release 名上，
       # 这样 update 检查比较版本时不会把 1.2.3-zh 当成预发布版本。
-      # 使用 pwsh 替代 sed，避免 Windows Git Bash 的兼容性问题
       - name: Set release version
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          # 剥离 -zh 汉化后缀，再剥离前导 v，得到用于 Cargo 的基础版本号
-          $version = $tag -replace '^v', '' -replace '-zh$', ''
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            Write-Error "Tag '$tag' does not yield a valid semver ('$version'). Aborting to prevent malformed Cargo.toml."
+          tag="${GITHUB_REF#refs/tags/}"
+          # 剥离前导 v，再剥离 -zh 汉化后缀，得到用于 Cargo 的基础版本号
+          version="${tag#v}"
+          version="${version%-zh}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$tag' does not yield a valid semver ('$version'). Aborting to prevent malformed Cargo.toml."
             exit 1
-          }
-          Write-Host "Tag: $tag -> Cargo version: $version"
+          fi
+          echo "Tag: $tag -> Cargo version: $version"
 
-          $toml = Get-Content Cargo.toml -Raw
-          $toml = $toml -replace '(?m)^version = "0\.0\.0-development"', "version = ""$version"""
-          Set-Content Cargo.toml -Value $toml -NoNewline
-
-          $lock = Get-Content Cargo.lock -Raw
-          $lock = $lock -replace '(?m)^version = "0\.0\.0-development"', "version = ""$version"""
-          Set-Content Cargo.lock -Value $lock -NoNewline
-
-          if (-not (Select-String -Path Cargo.toml -Pattern "^version = ""$version""`$")) {
-            Write-Error "Version replacement in Cargo.toml failed!"
-            exit 1
-          }
-          if (-not (Select-String -Path Cargo.lock -Pattern "^version = ""$version""`$")) {
-            Write-Error "Version replacement in Cargo.lock failed!"
-            exit 1
-          }
-          Write-Host "Version set successfully"
+          sed -i "s/^version = \"0.0.0-development\"$/version = \"${version}\"/" Cargo.toml Cargo.lock
+          grep -q "^version = \"${version}\"$" Cargo.toml
+          grep -q "^version = \"${version}\"$" Cargo.lock
+          echo "Version set successfully"
 
       # 在 --frozen 构建前预下载依赖，避免缓存失效时构建失败
       - name: Fetch dependencies
         run: cargo fetch --locked
 
-      - run: cargo build --release --frozen
+      - run: mise run build
 
-      # 仅在严格 semver 标签时创建 Release（-zh 标签已被 tag filter 排除）
-      - name: Create GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      # -zh 标签同样发布，产物版本号为基础 semver
+      - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
           make_latest: true
