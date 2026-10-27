@@ -168,7 +168,7 @@ fn notify_priority_restored(
     throttler.send_if_not_throttled(
         &throttle_key,
         title,
-        &format!("已根据优先级列表切换到 {device_name}。"),
+        &format!("已根据设备顺序切换到 {device_name}。"),
     );
 }
 

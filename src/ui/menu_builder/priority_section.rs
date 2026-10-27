@@ -80,7 +80,7 @@ fn append_priority_list_and_add_entries(
     persistent_state: &PersistentState,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    submenu.append(&MenuItem::new("优先级列表", false, None))?;
+    submenu.append(&MenuItem::new("当前顺序", false, None))?;
 
     let priority_list = persistent_state.priority_list_of(device_type, kind);
     if priority_list.is_empty() {
@@ -88,10 +88,7 @@ fn append_priority_list_and_add_entries(
     } else {
         for (index, device_id) in priority_list.iter().enumerate() {
             let device_name = if device_id.is_main_priority() {
-                match device_type {
-                    DeviceType::Output => "输出设备优先级".to_string(),
-                    DeviceType::Input => "输入设备优先级".to_string(),
-                }
+                "跟随系统默认设备".to_string()
             } else {
                 lookup_device_name(device_id, persistent_state, backend)
             };
@@ -114,11 +111,7 @@ fn append_priority_list_and_add_entries(
 
     if kind == PriorityKind::Communication && !priority_list.iter().any(|id| id.is_main_priority())
     {
-        let label = match device_type {
-            DeviceType::Output => "输出设备优先级".to_string(),
-            DeviceType::Input => "输入设备优先级".to_string(),
-        };
-        devices_to_add.push((DeviceId::main_priority(), label));
+        devices_to_add.push((DeviceId::main_priority(), "跟随系统默认设备".to_string()));
     }
 
     let devices = backend.devices(device_type).unwrap_or_else(|e| {
@@ -175,8 +168,8 @@ fn build_priority_submenu(
     map: &mut MenuIdMap,
 ) -> anyhow::Result<Submenu> {
     let title = match kind {
-        PriorityKind::Main => "设备优先级设置",
-        PriorityKind::Communication => "通信优先级设置",
+        PriorityKind::Main => "设备顺序设置",
+        PriorityKind::Communication => "通信设备顺序设置",
     };
     let submenu = Submenu::new(title, true);
 
@@ -220,8 +213,8 @@ pub fn append_priority_list_to_menu(
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
     let header_label = match device_type {
-        DeviceType::Output => "默认输出设备优先级",
-        DeviceType::Input => "默认输入设备优先级",
+        DeviceType::Output => "输出设备的默认顺序",
+        DeviceType::Input => "输入设备的默认顺序",
     };
     let header = MenuItem::new(header_label, false, None);
     tray_menu.append(&header)?;
@@ -265,7 +258,7 @@ pub fn append_temporary_priority_section(
     temporary_priorities: &TemporaryPriorities,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("临时优先级", false, None))?;
+    tray_menu.append(&MenuItem::new("临时设备顺序", false, None))?;
 
     let targets = [
         (DeviceType::Output, PriorityKind::Main, "输出"),
@@ -388,8 +381,8 @@ mod tests {
             let items = menu.items();
 
             let header_title = match device_type {
-                DeviceType::Output => "默认输出设备优先级",
-                DeviceType::Input => "默认输入设备优先级",
+                DeviceType::Output => "输出设备的默认顺序",
+                DeviceType::Input => "输入设备的默认顺序",
             };
             assert!(
                 items
@@ -402,13 +395,13 @@ mod tests {
                 .iter()
                 .find_map(|i| {
                     i.as_submenu()
-                        .filter(|s| s.text() == "设备优先级设置")
+                        .filter(|s| s.text() == "设备顺序设置")
                         .cloned()
                 })
                 .expect("Device priority settings submenu must be present");
 
             let main_items = main_sub.items();
-            assert_eq!(main_items[0].as_menuitem().unwrap().text(), "优先级列表");
+            assert_eq!(main_items[0].as_menuitem().unwrap().text(), "当前顺序");
             assert_eq!(
                 main_items
                     .last()
@@ -424,18 +417,15 @@ mod tests {
                 .iter()
                 .find_map(|i| {
                     i.as_submenu()
-                        .filter(|s| s.text() == "通信优先级设置")
+                        .filter(|s| s.text() == "通信设备顺序设置")
                         .cloned()
                 })
                 .expect("Communication priority settings submenu must be present");
 
             let comm_items = comm_sub.items();
-            assert_eq!(comm_items[0].as_menuitem().unwrap().text(), "优先级列表");
+            assert_eq!(comm_items[0].as_menuitem().unwrap().text(), "当前顺序");
             // Default communication priority list contains main priority entry
-            let main_priority_title = match device_type {
-                DeviceType::Output => "1. 输出设备优先级",
-                DeviceType::Input => "1. 输入设备优先级",
-            };
+            let main_priority_title = "1. 跟随系统默认设备";
             assert!(comm_items.iter().any(|i| {
                 i.as_submenu()
                     .is_some_and(|s| s.text() == main_priority_title)
@@ -487,7 +477,7 @@ mod tests {
         append_temporary_priority_section(&menu, &backend, &state, &temp, &mut map).unwrap();
 
         let items = menu.items();
-        assert_eq!(items[0].as_menuitem().unwrap().text(), "临时优先级");
+        assert_eq!(items[0].as_menuitem().unwrap().text(), "临时设备顺序");
 
         assert_eq!(items[1].as_submenu().unwrap().text(), "输出：Speakers");
         assert_eq!(items[2].as_submenu().unwrap().text(), "通信：Headset");
