@@ -3,28 +3,27 @@ name: Sync Upstream
 on:
   schedule:
     - cron: '0 0 * * *' # 每天 UTC 0:00
-  workflow_dispatch:       # 手动触发
+  workflow_dispatch: # 手动触发
 
-# 防止 cron 和手动触发同时运行导致 git push 竞态
+# 防止 cron 和手动触发同时运行
 concurrency:
   group: sync-upstream
   cancel-in-progress: true
 
+# 本工作流只做「提醒」：不合并、不推送、不打 tag、不发版。
+# 汉化版本必须人工合并并逐条处理文案，自动合入会静默带回英文原文。
 jobs:
-  sync:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions: write-all     # contents + pull-requests + workflows（GITHUB_TOKEN 修改 workflow 文件必需）
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout fork
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Set up Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Add upstream
         run: git remote add upstream https://github.com/felipecrs/volume-locker.git
@@ -34,102 +33,90 @@ jobs:
           git fetch upstream master
           git fetch upstream --tags
 
-      # 上游无新提交则跳过，避免每天空跑浪费 CI 时间
       - name: Check for new upstream commits
         id: check
         run: |
           BEHIND=$(git rev-list --count HEAD..upstream/master)
+          echo "behind=${BEHIND}" >> "$GITHUB_OUTPUT"
           if [ "$BEHIND" -eq 0 ]; then
-            echo "No new upstream commits, skipping"
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Found ${BEHIND} new upstream commit(s)"
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Merge upstream
-        id: merge
-        if: steps.check.outputs.has_changes == 'true'
-        run: |
-          if git merge upstream/master --no-edit; then
-            echo "merged=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "merged=false" >> "$GITHUB_OUTPUT"
-          fi
-        continue-on-error: true
-
-      # 合并后回退 workflow 文件到 fork 版本，避免 GITHUB_TOKEN 因修改 workflow 被拒
-      - name: Keep fork workflow files
-        if: steps.merge.outputs.merged == 'true'
-        run: |
-          git checkout HEAD^ -- .github/workflows/
-          git commit --amend --no-edit
-
-      - name: Push merged changes
-        if: steps.merge.outputs.merged == 'true'
-        run: git push origin master
-
-      # 注意：GITHUB_TOKEN 推送的 tag 默认不触发其他 workflow
-      - name: Auto-tag with -zh suffix
-        if: steps.merge.outputs.merged == 'true'
-        run: |
-          LATEST=$(git ls-remote --tags upstream 'refs/tags/v[0-9]*.[0-9]*.[0-9]*' \
-            | sed 's|.*refs/tags/||' \
-            | sort -V \
-            | tail -1)
-          if [ -z "$LATEST" ]; then
-            echo "No upstream semver tags found, skipping"
+            echo "No new upstream commits, nothing to report"
             exit 0
           fi
-          echo "Latest upstream tag: ${LATEST}"
+          echo "Found ${BEHIND} new upstream commit(s)"
+          {
+            echo "upstream/master 新增 ${BEHIND} 个提交："
+            echo ""
+            echo '```'
+            git log --oneline --no-decorate HEAD..upstream/master
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # 剥离已有的 -zh 后缀，防止产生 v1.2.3-zh-zh
-          LATEST_BASE="${LATEST%-zh}"
-          ZH_TAG="${LATEST_BASE}-zh"
-
-          if git ls-remote --tags origin "refs/tags/${ZH_TAG}" | grep -q .; then
-            echo "Tag ${ZH_TAG} already exists, skipping"
-          else
-            echo "Creating tag ${ZH_TAG}"
-            git tag "${ZH_TAG}"
-            git push origin "${ZH_TAG}"
-          fi
-
-      # 放弃失败的合并，清理工作树中的冲突标记
-      - name: Abort failed merge
-        if: steps.merge.outputs.merged == 'false'
-        run: git merge --abort
-
-      # 将 upstream/master 直接推到一个独立分支，作为 PR 的源
-      - name: Push upstream to PR branch
-        if: steps.merge.outputs.merged == 'false'
+      # 试合并一次，只为判断有没有冲突；结束后无论结果如何都把工作区还原
+      - name: Probe merge conflicts
+        if: steps.check.outputs.behind != '0'
+        id: probe
         run: |
-          git push origin upstream/master:refs/heads/upstream-sync --force
+          BEFORE=$(git rev-parse HEAD)
+          if git merge upstream/master --no-edit > /tmp/merge.log 2>&1; then
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+            {
+              echo ""
+              echo "存在冲突，需要手动解决的文件："
+              echo ""
+              echo '```'
+              git diff --name-only --diff-filter=U
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          git reset --hard "$BEFORE"
+          git clean -fd > /dev/null 2>&1 || true
 
-      - name: Create PR for conflicts
-        if: steps.merge.outputs.merged == 'false'
+      - name: Report via issue
+        if: steps.check.outputs.behind != '0'
         env:
           GH_TOKEN: ${{ github.token }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+          CONFLICTS: ${{ steps.probe.outputs.conflicts }}
         run: |
-          # 避免重复创建 PR
-          if gh pr list --head upstream-sync --state open --json number -q '.[0].number' | grep -q .; then
-            echo "An open PR for upstream-sync already exists, skipping"
+          if [ "$CONFLICTS" = "true" ]; then
+            RESULT='**有冲突**，需要手动解决'
+          else
+            RESULT='试合并无冲突，但因为涉及界面文案，仍需人工逐条汉化'
+          fi
+
+          {
+            echo "上游仓库 felipecrs/volume-locker 有新的提交。"
+            echo ""
+            echo "- 落后提交数：${BEHIND}"
+            echo "- 试合并结果：${RESULT}"
+            echo ""
+            echo "本工作流只做提醒，不会自动合并，也不会自动打 tag 或发版。"
+            echo ""
+            echo '```bash'
+            echo 'git fetch fork --tags'
+            echo 'git fetch origin --tags'
+            echo 'git checkout master'
+            echo 'git merge fork/master'
+            echo 'git merge origin/master'
+            echo '# 解决冲突、补全汉化后：git push fork master'
+            echo '```'
+          } > /tmp/issue-body.md
+
+          # 让这条提醒在 Actions 运行页的 Annotations 里也显出来
+          echo "::warning::上游有 ${BEHIND} 个新提交待同步（试合并结果：${RESULT}）"
+
+          TITLE="🔄 上游有新的更新待同步"
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" -q .has_issues 2>/dev/null)" != "true" ]; then
+            echo "Issues are disabled on ${GITHUB_REPOSITORY}; skipping issue report (see the run summary above)"
             exit 0
           fi
-          gh pr create \
-            --title "🔄 同步上游更新 (有冲突需手动处理)" \
-            --body "上游仓库 [felipecrs/volume-locker](https://github.com/felipecrs/volume-locker) 有新的提交。
 
-          **自动合并失败**，存在冲突需要手动解决。
-
-          手动处理步骤：
-
-          \`\`\`bash
-          git checkout master
-          git pull origin master
-          git merge upstream/master
-          # 解决冲突后
-          git push origin master
-          \`\`\`" \
-            --base master \
-            --head upstream-sync
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number -q '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            echo "Open tracking issue #${EXISTING} found, appending a comment"
+            gh issue comment "$EXISTING" --body-file /tmp/issue-body.md || true
+          else
+            gh issue create --title "$TITLE" --body-file /tmp/issue-body.md || true
+          fi
