@@ -50,7 +50,7 @@ fn enforce_priority_for_type(
         priority_list.insert(0, temp_id.clone());
     }
 
-    let main_target = find_highest_priority_active_device(backend, &priority_list);
+    let main_target = find_highest_priority_active_device(backend, &priority_list, state);
     let comm_target = resolve_communication_target(
         backend,
         device_type,
@@ -76,7 +76,11 @@ fn enforce_priority_for_type(
             }
         }
         if changed {
-            log::info!("Enforced {device_type} priority: switched to {target_id}");
+            let name = backend
+                .device_by_id(target_id)
+                .map(|d| d.name())
+                .unwrap_or_else(|_| target_id.to_string());
+            log::info!("Enforced {device_type} priority: switched to '{name}' ({target_id})");
             switched.push((target_id.clone(), PriorityKind::Main));
         }
     }
@@ -84,14 +88,20 @@ fn enforce_priority_for_type(
     if let Some(target_id) = &comm_target
         && !is_default_device(backend, device_type, DeviceRole::Communications, target_id)
     {
-        log::info!("Enforcing {device_type} priority (Communication): Switching to {target_id}");
+        let name = backend
+            .device_by_id(target_id)
+            .map(|d| d.name())
+            .unwrap_or_else(|_| target_id.to_string());
         match backend.set_default_device(target_id, DeviceRole::Communications) {
             Err(e) => log::error!(
-                "Failed to set default {device_type} communications device to {target_id}: {e:#}"
+                "Failed to set default {device_type} communications device to '{name}' ({target_id}): {e:#}"
             ),
             // Report a successful communication switch separately only when
             // the main roles did not already switch to the same device.
             Ok(()) if !switched.iter().any(|(id, _)| id == target_id) => {
+                log::info!(
+                    "Enforced {device_type} communication priority: switched to '{name}' ({target_id})"
+                );
                 switched.push((target_id.clone(), PriorityKind::Communication));
             }
             Ok(()) => {}
@@ -124,17 +134,16 @@ fn resolve_communication_target(
     {
         return Some(temp_id.clone());
     }
-
     let comm_list = state.communication_priority_list(device_type);
     for entry_id in comm_list {
         if entry_id.is_main_priority() {
             if let Some(main_id) = main_target {
                 return Some(main_id.clone());
             }
-        } else if let Ok(device) = backend.device_by_id(entry_id)
-            && let Ok(true) = device.is_active()
+        } else if let Some(device_id) =
+            find_highest_priority_active_device(backend, std::slice::from_ref(entry_id), state)
         {
-            return Some(entry_id.clone());
+            return Some(device_id);
         }
     }
 
@@ -175,20 +184,33 @@ fn notify_priority_restored(
 fn find_highest_priority_active_device(
     backend: &impl AudioBackend,
     priority_list: &[DeviceId],
+    state: &PersistentState,
 ) -> Option<DeviceId> {
     priority_list
         .iter()
+        .filter(|device_id| {
+            state.device_settings(device_id).is_none_or(|s| {
+                backend.headset_presence(s.presence_source)
+                    != super::presence::HeadsetPresence::Unavailable
+            })
+        })
         .find_map(|device_id| match backend.device_by_id(device_id) {
             Ok(device) => match device.is_active() {
                 Ok(true) => Some(device_id.clone()),
-                Ok(false) => None,
+                Ok(false) => {
+                    log::debug!(
+                        "Device '{}' ({device_id}) is inactive, skipping in priority order",
+                        device.name()
+                    );
+                    None
+                }
                 Err(e) => {
                     log::warn!("Failed to check if device {device_id} is active: {e:#}");
                     None
                 }
             },
             Err(e) => {
-                log::warn!("Failed to get device {device_id} for priority check: {e:#}");
+                log::debug!("Device {device_id} is not connected, skipping in priority order: {e}");
                 None
             }
         })
@@ -720,7 +742,7 @@ mod tests {
         ]);
         let list = vec!["dev_a".into(), "dev_b".into(), "dev_c".into()];
         assert_eq!(
-            find_highest_priority_active_device(&backend, &list),
+            find_highest_priority_active_device(&backend, &list, &PersistentState::default()),
             Some(DeviceId::from("dev_b"))
         );
     }
@@ -732,13 +754,19 @@ mod tests {
             MockDevice::new("dev_b", "B", false),
         ]);
         let list = vec!["dev_a".into(), "dev_b".into()];
-        assert_eq!(find_highest_priority_active_device(&backend, &list), None);
+        assert_eq!(
+            find_highest_priority_active_device(&backend, &list, &PersistentState::default()),
+            None
+        );
     }
 
     #[test]
     fn find_highest_returns_none_for_empty_list() {
         let backend = MockAudioBackend::new(vec![]);
         let list: Vec<DeviceId> = vec![];
-        assert_eq!(find_highest_priority_active_device(&backend, &list), None);
+        assert_eq!(
+            find_highest_priority_active_device(&backend, &list, &PersistentState::default()),
+            None
+        );
     }
 }

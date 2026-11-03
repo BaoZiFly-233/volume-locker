@@ -1,4 +1,5 @@
 mod device_section;
+mod presence_section;
 mod priority_section;
 
 use super::{AppAction, DeviceAction, MenuAction, MenuItemInfo};
@@ -82,8 +83,8 @@ fn lookup_device_name(
         match backend.device_by_id(device_id) {
             Ok(d) => d.name(),
             Err(e) => {
-                log::warn!("Failed to look up device name for {device_id}: {e:#}");
-                "未知设备".to_string()
+                log::info!("Device {device_id} is not connected for name lookup: {e:#}");
+                device_id.to_string()
             }
         }
     }
@@ -92,6 +93,7 @@ fn lookup_device_name(
 pub struct TrayMenuItems<'a> {
     pub auto_launch_check: &'a CheckMenuItem,
     pub check_updates_on_launch: &'a CheckMenuItem,
+    pub notify_on_device_migration: &'a CheckMenuItem,
     pub quit: &'a MenuItem,
     pub output_devices_heading: &'a MenuItem,
     pub input_devices_heading: &'a MenuItem,
@@ -204,6 +206,18 @@ fn append_preferences_section(
         },
     );
     tray_menu.append(items.check_updates_on_launch)?;
+
+    items
+        .notify_on_device_migration
+        .set_checked(persistent_state.notify_on_device_migration);
+    map.insert(
+        items.notify_on_device_migration.id().clone(),
+        MenuItemInfo {
+            name: "设备迁移时通知".to_string(),
+            action: MenuAction::App(AppAction::ToggleNotifyOnDeviceMigration),
+        },
+    );
+    tray_menu.append(items.notify_on_device_migration)?;
     tray_menu.append(&PredefinedMenuItem::separator())?;
 
     Ok(())

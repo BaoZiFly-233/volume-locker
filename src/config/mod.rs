@@ -36,6 +36,7 @@ struct PersistentStateFlat {
     switch_communication_device_output: bool,
     switch_communication_device_input: bool,
     check_updates_on_launch: bool,
+    notify_on_device_migration: bool,
 }
 
 impl Default for PersistentStateFlat {
@@ -80,6 +81,7 @@ impl From<PersistentStateFlat> for PersistentState {
                     .notify_on_priority_restore_input_communication,
             },
             check_updates_on_launch: flat.check_updates_on_launch,
+            notify_on_device_migration: flat.notify_on_device_migration,
         }
     }
 }
@@ -114,6 +116,7 @@ impl From<PersistentState> for PersistentStateFlat {
             switch_communication_device_output: switch_comm_out,
             switch_communication_device_input: switch_comm_in,
             check_updates_on_launch: state.check_updates_on_launch,
+            notify_on_device_migration: state.notify_on_device_migration,
         }
     }
 }
@@ -125,6 +128,7 @@ pub struct PersistentState {
     pub(crate) output: PerTypeSettings,
     pub(crate) input: PerTypeSettings,
     pub check_updates_on_launch: bool,
+    pub notify_on_device_migration: bool,
 }
 
 impl PersistentState {
@@ -257,10 +261,9 @@ impl PersistentState {
         if device_id.is_main_priority() {
             return;
         }
-        let is_prunable = self
-            .devices
-            .get(device_id)
-            .is_some_and(|s| !s.has_active_locks_or_notifications());
+        let is_prunable = self.devices.get(device_id).is_some_and(|s| {
+            !s.has_active_locks_or_notifications() && s.presence_source.is_windows()
+        });
         if !is_prunable {
             return;
         }
@@ -286,6 +289,7 @@ impl Default for PersistentState {
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: true,
+            notify_on_device_migration: false,
         }
     }
 }
@@ -337,6 +341,8 @@ mod tests {
                     unmute_lock: UnmuteLockPolicy::default(),
                     device_type: DeviceType::Output,
                     name: "Test Device".into(),
+                    presence_source: Default::default(),
+                    fingerprint: None,
                 },
             )]),
             ..Default::default()
@@ -359,6 +365,7 @@ mod tests {
         let state: PersistentState = serde_json::from_str(json).unwrap();
         assert!(state.output.priority_list.is_empty());
         assert!(state.check_updates_on_launch);
+        assert!(!state.notify_on_device_migration);
     }
 
     #[test]
@@ -515,6 +522,7 @@ mod tests {
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: false,
+            notify_on_device_migration: true,
             devices: HashMap::from([(
                 "dev_a".into(),
                 DeviceSettings {
@@ -529,6 +537,8 @@ mod tests {
                     },
                     device_type: DeviceType::Output,
                     name: "Speakers".into(),
+                    presence_source: Default::default(),
+                    fingerprint: None,
                 },
             )]),
         };
@@ -546,6 +556,7 @@ mod tests {
         assert!(loaded.output.notify_on_priority_restore);
         assert!(loaded.input.communication_priority_list.is_empty());
         assert!(!loaded.check_updates_on_launch);
+        assert!(loaded.notify_on_device_migration);
 
         let dev = loaded.devices.get("dev_a").unwrap();
         assert!(dev.volume_lock.is_locked);
