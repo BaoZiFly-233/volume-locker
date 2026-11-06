@@ -20,7 +20,6 @@ pub(crate) struct PerTypeSettings {
 }
 
 /// Flat serde representation for backward-compatible JSON serialization.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 struct PersistentStateFlat {
@@ -36,7 +35,11 @@ struct PersistentStateFlat {
     switch_communication_device_output: bool,
     switch_communication_device_input: bool,
     check_updates_on_launch: bool,
-    notify_on_device_migration: bool,
+    transfer_device_settings: bool,
+    #[serde(alias = "notify_on_device_migration")]
+    notify_on_settings_transfer: bool,
+    transfer_device_name_and_icon: bool,
+    skip_disconnected_wireless_headsets: bool,
 }
 
 impl Default for PersistentStateFlat {
@@ -81,7 +84,10 @@ impl From<PersistentStateFlat> for PersistentState {
                     .notify_on_priority_restore_input_communication,
             },
             check_updates_on_launch: flat.check_updates_on_launch,
-            notify_on_device_migration: flat.notify_on_device_migration,
+            transfer_device_settings: flat.transfer_device_settings,
+            notify_on_settings_transfer: flat.notify_on_settings_transfer,
+            transfer_device_name_and_icon: flat.transfer_device_name_and_icon,
+            skip_disconnected_wireless_headsets: flat.skip_disconnected_wireless_headsets,
         }
     }
 }
@@ -116,7 +122,10 @@ impl From<PersistentState> for PersistentStateFlat {
             switch_communication_device_output: switch_comm_out,
             switch_communication_device_input: switch_comm_in,
             check_updates_on_launch: state.check_updates_on_launch,
-            notify_on_device_migration: state.notify_on_device_migration,
+            transfer_device_settings: state.transfer_device_settings,
+            notify_on_settings_transfer: state.notify_on_settings_transfer,
+            transfer_device_name_and_icon: state.transfer_device_name_and_icon,
+            skip_disconnected_wireless_headsets: state.skip_disconnected_wireless_headsets,
         }
     }
 }
@@ -128,7 +137,10 @@ pub struct PersistentState {
     pub(crate) output: PerTypeSettings,
     pub(crate) input: PerTypeSettings,
     pub check_updates_on_launch: bool,
-    pub notify_on_device_migration: bool,
+    pub transfer_device_settings: bool,
+    pub notify_on_settings_transfer: bool,
+    pub transfer_device_name_and_icon: bool,
+    pub skip_disconnected_wireless_headsets: bool,
 }
 
 impl PersistentState {
@@ -261,9 +273,10 @@ impl PersistentState {
         if device_id.is_main_priority() {
             return;
         }
-        let is_prunable = self.devices.get(device_id).is_some_and(|s| {
-            !s.has_active_locks_or_notifications() && s.presence_source.is_windows()
-        });
+        let is_prunable = self
+            .devices
+            .get(device_id)
+            .is_some_and(|s| !s.has_active_locks_or_notifications());
         if !is_prunable {
             return;
         }
@@ -289,13 +302,15 @@ impl Default for PersistentState {
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: true,
-            notify_on_device_migration: false,
+            transfer_device_settings: true,
+            notify_on_settings_transfer: false,
+            transfer_device_name_and_icon: true,
+            skip_disconnected_wireless_headsets: true,
         }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use crate::consts::STATE_FILE_NAME;
@@ -320,6 +335,7 @@ mod tests {
             vec![DeviceId::main_priority()]
         );
         assert!(state.check_updates_on_launch);
+        assert!(state.skip_disconnected_wireless_headsets);
     }
 
     #[test]
@@ -341,7 +357,6 @@ mod tests {
                     unmute_lock: UnmuteLockPolicy::default(),
                     device_type: DeviceType::Output,
                     name: "Test Device".into(),
-                    presence_source: Default::default(),
                     fingerprint: None,
                 },
             )]),
@@ -365,7 +380,10 @@ mod tests {
         let state: PersistentState = serde_json::from_str(json).unwrap();
         assert!(state.output.priority_list.is_empty());
         assert!(state.check_updates_on_launch);
-        assert!(!state.notify_on_device_migration);
+        assert!(state.transfer_device_settings);
+        assert!(!state.notify_on_settings_transfer);
+        assert!(state.transfer_device_name_and_icon);
+        assert!(state.skip_disconnected_wireless_headsets);
     }
 
     #[test]
@@ -522,7 +540,10 @@ mod tests {
                 ..PerTypeSettings::default()
             },
             check_updates_on_launch: false,
-            notify_on_device_migration: true,
+            transfer_device_settings: false,
+            notify_on_settings_transfer: true,
+            transfer_device_name_and_icon: false,
+            skip_disconnected_wireless_headsets: false,
             devices: HashMap::from([(
                 "dev_a".into(),
                 DeviceSettings {
@@ -537,7 +558,6 @@ mod tests {
                     },
                     device_type: DeviceType::Output,
                     name: "Speakers".into(),
-                    presence_source: Default::default(),
                     fingerprint: None,
                 },
             )]),
@@ -556,7 +576,9 @@ mod tests {
         assert!(loaded.output.notify_on_priority_restore);
         assert!(loaded.input.communication_priority_list.is_empty());
         assert!(!loaded.check_updates_on_launch);
-        assert!(loaded.notify_on_device_migration);
+        assert!(!loaded.transfer_device_settings);
+        assert!(loaded.notify_on_settings_transfer);
+        assert!(!loaded.transfer_device_name_and_icon);
 
         let dev = loaded.devices.get("dev_a").unwrap();
         assert!(dev.volume_lock.is_locked);
@@ -622,6 +644,13 @@ mod tests {
         // Cleanup
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn notify_preference_loads_from_its_released_key() {
+        let state: PersistentState =
+            serde_json::from_str(r#"{"notify_on_device_migration": true}"#).unwrap();
+        assert!(state.notify_on_settings_transfer);
     }
 
     #[test]

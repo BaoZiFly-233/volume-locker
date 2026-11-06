@@ -1,16 +1,14 @@
-use crate::types::{
-    DeviceChangeSource, DeviceId, DeviceRole, DeviceType, PresenceSource, VolumeScalar,
-};
+use crate::i18n::t;
+use crate::types::{DeviceChangeSource, DeviceId, DeviceRole, DeviceType, VolumeScalar};
 
 pub mod presence;
 use presence::HeadsetPresence;
 
-#[cfg(target_os = "windows")]
 mod windows_com_policy_config;
 
 pub trait AudioBackend {
-    fn configure_presence_monitoring(&self, _enabled: bool) {}
-    fn headset_presence(&self, _source: PresenceSource) -> HeadsetPresence {
+    fn configure_presence_monitoring(&self, _usb_devices: &[(u16, u16)]) {}
+    fn headset_presence(&self, _usb_vid_pid: (u16, u16)) -> HeadsetPresence {
         HeadsetPresence::Unknown
     }
     fn devices(&self, device_type: DeviceType) -> anyhow::Result<Vec<Box<dyn AudioDevice>>>;
@@ -30,6 +28,14 @@ pub trait AudioBackend {
     fn device_fingerprint(&self, _id: &DeviceId) -> Option<crate::types::DeviceFingerprint> {
         None
     }
+
+    /// Writes a device's last seen Windows endpoint name and icon to its new endpoint.
+    fn restore_device_properties(
+        &self,
+        id: &DeviceId,
+        endpoint_name: Option<&str>,
+        icon_path: Option<&str>,
+    ) -> anyhow::Result<()>;
 }
 
 pub trait AudioDevice {
@@ -51,18 +57,16 @@ pub trait AudioDevice {
     }
 }
 
-#[cfg(target_os = "windows")]
 mod windows;
-#[cfg(target_os = "windows")]
 pub use self::windows::WindowsAudioBackend as AudioBackendImpl;
 
-mod migration;
 #[cfg(test)]
 mod presence_tests;
 mod priority;
+mod transfer;
 
-pub use migration::migrate_device_ids;
 pub use priority::enforce_priorities;
+pub use transfer::transfer_device_settings;
 
 use crate::notification::NotificationThrottler;
 
@@ -91,12 +95,10 @@ pub fn check_and_unmute_device(
     }
     log::info!("Unmuted '{device_name}' due to lock settings");
     if notify {
-        let (notification_title, notification_suffix) =
-            get_unmute_notification_details(device_type);
-        let message = format!("{device_name} {notification_suffix}");
+        let (title, message) = get_unmute_notification_details(device_type, &device_name);
         throttler.send_if_not_throttled(
             &format!("unmute_{id}", id = device.id()),
-            notification_title,
+            &title,
             &message,
         );
     }
@@ -128,20 +130,23 @@ pub fn enforce_volume_lock(
     if lock.notify {
         throttler.send_if_not_throttled(
             &format!("volume_restore_{device_id}"),
-            "音量已恢复",
-            &format!(
-                "{device_name} 的音量已从 {new_volume_percent}% 恢复到 {target_volume_percent}%。"
+            &t!("volume-restored-title"),
+            &t!(
+                "volume-restored",
+                device = device_name,
+                from = new_volume_percent.to_string(),
+                to = target_volume_percent.to_string()
             ),
         );
     }
 }
 
-fn get_unmute_notification_details(device_type: DeviceType) -> (&'static str, &'static str) {
+fn get_unmute_notification_details(device_type: DeviceType, device_name: &str) -> (String, String) {
     let title = match device_type {
-        DeviceType::Input => "输入设备已取消静音",
-        DeviceType::Output => "输出设备已取消静音",
+        DeviceType::Input => t!("input-unmuted-title"),
+        DeviceType::Output => t!("output-unmuted-title"),
     };
-    (title, "已根据「保持不静音」设置取消静音。")
+    (title, t!("device-unmuted", device = device_name))
 }
 
 /// Returns a list of `(device_id, new_name, device_type, Option<DeviceFingerprint>)` tuples for all
@@ -187,6 +192,8 @@ pub(crate) mod tests {
     };
     use std::cell::RefCell;
     use std::collections::HashMap;
+
+    type RestoredProperties = Vec<(DeviceId, Option<String>, Option<String>)>;
 
     pub(crate) struct MockDevice {
         pub(crate) id: DeviceId,
@@ -263,6 +270,8 @@ pub(crate) mod tests {
         pub(crate) set_default_fails: RefCell<bool>,
         pub(crate) presence: RefCell<HeadsetPresence>,
         pub(crate) disconnected_fingerprints: RefCell<HashMap<DeviceId, DeviceFingerprint>>,
+        pub(crate) restored_properties: RefCell<RestoredProperties>,
+        pub(crate) restore_properties_fails: bool,
     }
 
     impl MockAudioBackend {
@@ -276,6 +285,8 @@ pub(crate) mod tests {
                 set_default_fails: RefCell::new(false),
                 presence: RefCell::new(HeadsetPresence::Unknown),
                 disconnected_fingerprints: RefCell::new(HashMap::new()),
+                restored_properties: RefCell::new(Vec::new()),
+                restore_properties_fails: false,
             }
         }
 
@@ -290,12 +301,8 @@ pub(crate) mod tests {
     }
 
     impl AudioBackend for MockAudioBackend {
-        fn headset_presence(&self, source: PresenceSource) -> HeadsetPresence {
-            if source == PresenceSource::AstroA50X {
-                *self.presence.borrow()
-            } else {
-                HeadsetPresence::Unknown
-            }
+        fn headset_presence(&self, _usb_vid_pid: (u16, u16)) -> HeadsetPresence {
+            *self.presence.borrow()
         }
 
         fn devices(&self, device_type: DeviceType) -> anyhow::Result<Vec<Box<dyn AudioDevice>>> {
@@ -336,6 +343,23 @@ pub(crate) mod tests {
                 .iter()
                 .find(|d| &d.id == id)
                 .and_then(|d| d.fingerprint.clone())
+        }
+
+        fn restore_device_properties(
+            &self,
+            id: &DeviceId,
+            endpoint_name: Option<&str>,
+            icon_path: Option<&str>,
+        ) -> anyhow::Result<()> {
+            self.restored_properties.borrow_mut().push((
+                id.clone(),
+                endpoint_name.map(str::to_string),
+                icon_path.map(str::to_string),
+            ));
+            if self.restore_properties_fails {
+                return Err(anyhow::anyhow!("Injected restore properties failure"));
+            }
+            Ok(())
         }
 
         fn default_device(
@@ -428,9 +452,9 @@ pub(crate) mod tests {
 
     #[test]
     fn unmute_notification_details_output() {
-        let (title, suffix) = get_unmute_notification_details(DeviceType::Output);
-        assert_eq!(title, "输出设备已取消静音");
-        assert!(suffix.contains("不静音"));
+        let (title, message) = get_unmute_notification_details(DeviceType::Output, "Speakers");
+        assert_eq!(title, "Output Device Unmuted");
+        assert_eq!(message, "Speakers was unmuted due to Keep unmuted setting.");
     }
 
     #[test]
@@ -445,9 +469,9 @@ pub(crate) mod tests {
 
     #[test]
     fn unmute_notification_details_input() {
-        let (title, suffix) = get_unmute_notification_details(DeviceType::Input);
-        assert_eq!(title, "输入设备已取消静音");
-        assert!(suffix.contains("不静音"));
+        let (title, message) = get_unmute_notification_details(DeviceType::Input, "Mic");
+        assert_eq!(title, "Input Device Unmuted");
+        assert_eq!(message, "Mic was unmuted due to Keep unmuted setting.");
     }
 
     // --- Error path tests ---
@@ -522,7 +546,7 @@ pub(crate) mod tests {
     // --- Integration test ---
 
     #[test]
-    fn migrate_then_enforce_integration() {
+    fn transfer_then_enforce_integration() {
         let backend = MockAudioBackend::new(vec![
             MockDevice::new("new_id", "Speakers", true),
             MockDevice::new("other", "Headphones", true),
@@ -537,7 +561,7 @@ pub(crate) mod tests {
         );
 
         let mut temp_priorities = TemporaryPriorities::default();
-        migrate_device_ids(
+        transfer_device_settings(
             &backend,
             &mut state,
             &mut temp_priorities,

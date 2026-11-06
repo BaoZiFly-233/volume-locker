@@ -1,4 +1,5 @@
 use crate::config::PersistentState;
+use crate::i18n::t;
 use crate::notification::NotificationThrottler;
 use crate::types::{DeviceId, DeviceRole, DeviceType, PriorityKind, TemporaryPriorities};
 
@@ -129,10 +130,10 @@ fn resolve_communication_target(
     main_target: Option<&DeviceId>,
 ) -> Option<DeviceId> {
     if let Some(temp_id) = temporary_comm
-        && let Ok(device) = backend.device_by_id(temp_id)
-        && let Ok(true) = device.is_active()
+        && let Some(device_id) =
+            find_highest_priority_active_device(backend, std::slice::from_ref(temp_id), state)
     {
-        return Some(temp_id.clone());
+        return Some(device_id);
     }
     let comm_list = state.communication_priority_list(device_type);
     for entry_id in comm_list {
@@ -160,15 +161,19 @@ fn notify_priority_restored(
     let device_name = backend.device_by_id(target_id).map_or_else(
         |e| {
             log::warn!("Could not get name for device {target_id}: {e:#}");
-            "未知设备".to_string()
+            t!("unknown-device")
         },
         |d| d.name(),
     );
     let title = match (device_type, kind) {
-        (DeviceType::Output, PriorityKind::Main) => "默认输出设备已恢复",
-        (DeviceType::Input, PriorityKind::Main) => "默认输入设备已恢复",
-        (DeviceType::Output, PriorityKind::Communication) => "通信输出设备已恢复",
-        (DeviceType::Input, PriorityKind::Communication) => "通信输入设备已恢复",
+        (DeviceType::Output, PriorityKind::Main) => t!("output-restored-title"),
+        (DeviceType::Input, PriorityKind::Main) => t!("input-restored-title"),
+        (DeviceType::Output, PriorityKind::Communication) => {
+            t!("output-communication-restored-title")
+        }
+        (DeviceType::Input, PriorityKind::Communication) => {
+            t!("input-communication-restored-title")
+        }
     };
     let throttle_key = match kind {
         PriorityKind::Main => format!("priority_restore_{target_id}"),
@@ -176,8 +181,8 @@ fn notify_priority_restored(
     };
     throttler.send_if_not_throttled(
         &throttle_key,
-        title,
-        &format!("已根据设备顺序切换到 {device_name}。"),
+        &title,
+        &t!("switched-by-priority", device = device_name.as_str()),
     );
 }
 
@@ -188,14 +193,24 @@ fn find_highest_priority_active_device(
 ) -> Option<DeviceId> {
     priority_list
         .iter()
-        .filter(|device_id| {
-            state.device_settings(device_id).is_none_or(|s| {
-                backend.headset_presence(s.presence_source)
-                    != super::presence::HeadsetPresence::Unavailable
-            })
-        })
         .find_map(|device_id| match backend.device_by_id(device_id) {
             Ok(device) => match device.is_active() {
+                Ok(true)
+                    if state.skip_disconnected_wireless_headsets
+                        && device
+                            .fingerprint()
+                            .and_then(|fingerprint| fingerprint.usb_vid_pid)
+                            .is_some_and(|usb_vid_pid| {
+                                backend.headset_presence(usb_vid_pid)
+                                    == super::presence::HeadsetPresence::Unavailable
+                            }) =>
+                {
+                    log::debug!(
+                        "Device '{}' ({device_id}) has no wireless headset link, skipping in priority order",
+                        device.name()
+                    );
+                    None
+                }
                 Ok(true) => Some(device_id.clone()),
                 Ok(false) => {
                     log::debug!(

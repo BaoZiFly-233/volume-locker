@@ -1,6 +1,6 @@
 use crate::bindings::{
-    CloseHandle, CreateMutexW, ERROR_ALREADY_EXISTS, GetLastError, HANDLE,
-    SetCurrentProcessExplicitAppUserModelID,
+    CloseHandle, CreateMutexW, ERROR_ALREADY_EXISTS, GetLastError, GetUserPreferredUILanguages,
+    HANDLE, MUI_LANGUAGE_NAME, SetCurrentProcessExplicitAppUserModelID,
 };
 use crate::consts::{APP_AUMID, APP_NAME, PNG_ICON_BYTES, PNG_ICON_FILE_NAME};
 use crate::types::DeviceId;
@@ -92,6 +92,35 @@ impl Drop for SingleInstanceGuard {
     }
 }
 
+/// Returns the user's Windows display languages as tags like `pt-BR`, most preferred first, or an
+/// empty list if Windows cannot report them.
+pub fn preferred_ui_languages() -> Vec<String> {
+    let flags = MUI_LANGUAGE_NAME as u32;
+    let mut count = 0;
+    let mut length = 0;
+    // SAFETY: Without a buffer, the first call only writes the required length to valid pointers.
+    let sized = unsafe { GetUserPreferredUILanguages(flags, &mut count, None, &mut length) };
+    let mut buffer = vec![0_u16; length as usize];
+    // SAFETY: The buffer holds the `length` characters that Windows just asked for.
+    if !sized.as_bool()
+        || !unsafe {
+            GetUserPreferredUILanguages(flags, &mut count, Some(buffer.as_mut_ptr()), &mut length)
+        }
+        .as_bool()
+    {
+        log::warn!(
+            "Failed to get Windows display languages: {}",
+            windows_core::Error::from_thread()
+        );
+        return Vec::new();
+    }
+    String::from_utf16_lossy(&buffer)
+        .split('\0')
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Checks if a directory is writable by attempting to create and delete a temp file.
 pub fn is_directory_writable(dir: &Path) -> bool {
     let test_path = dir.join(".volume_locker_write_test");
@@ -122,6 +151,17 @@ pub fn open_sound_control_panel(tab_selector: &str) -> anyhow::Result<()> {
         "Control_RunDLL",
         &format!("mmsys.cpl,,{tab_selector}"),
         "open sound control panel",
+    )
+}
+
+/// Opens the Properties dialog of one endpoint. This argument format is undocumented; it is the
+/// one Windows' own SndVol.exe uses.
+pub fn open_device_properties(device_id: &DeviceId) -> anyhow::Result<()> {
+    spawn_rundll32(
+        "shell32.dll",
+        "Control_RunDLL",
+        &format!("mmsys.cpl,,{device_id},general"),
+        "open device properties",
     )
 }
 

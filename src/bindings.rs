@@ -63,6 +63,40 @@ pub unsafe fn GetLastError() -> u32 {
     unsafe { GetLastError() }
 }
 #[inline]
+pub unsafe fn GetUserPreferredUILanguages(
+    dwflags: u32,
+    pulnumlanguages: *mut u32,
+    pwszlanguagesbuffer: Option<*mut u16>,
+    pcchlanguagesbuffer: *mut u32,
+) -> windows_core::BOOL {
+    windows_core::link!("kernel32.dll" "system" fn GetUserPreferredUILanguages(dwflags : u32, pulnumlanguages : *mut u32, pwszlanguagesbuffer : *mut u16, pcchlanguagesbuffer : *mut u32) -> windows_core::BOOL);
+    unsafe {
+        GetUserPreferredUILanguages(
+            dwflags,
+            pulnumlanguages as _,
+            pwszlanguagesbuffer.unwrap_or(core::mem::zeroed()) as _,
+            pcchlanguagesbuffer as _,
+        )
+    }
+}
+#[inline]
+pub unsafe fn PostMessageW(
+    hwnd: Option<HWND>,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> windows_core::BOOL {
+    windows_core::link!("user32.dll" "system" fn PostMessageW(hwnd : HWND, msg : u32, wparam : WPARAM, lparam : LPARAM) -> windows_core::BOOL);
+    unsafe {
+        PostMessageW(
+            hwnd.unwrap_or(core::mem::zeroed()) as _,
+            msg,
+            wparam,
+            lparam,
+        )
+    }
+}
+#[inline]
 pub unsafe fn PropVariantClear(pvar: *mut PROPVARIANT) -> windows_core::HRESULT {
     windows_core::link!("ole32.dll" "system" fn PropVariantClear(pvar : *mut PROPVARIANT) -> windows_core::HRESULT);
     unsafe { PropVariantClear(pvar) }
@@ -86,12 +120,22 @@ pub unsafe fn PropVariantToUInt32(propvarin: *const PROPVARIANT) -> windows_core
     }
 }
 #[inline]
+pub unsafe fn RegisterSuspendResumeNotification(hrecipient: HANDLE, flags: u32) -> HPOWERNOTIFY {
+    windows_core::link!("user32.dll" "system" fn RegisterSuspendResumeNotification(hrecipient : HANDLE, flags : u32) -> HPOWERNOTIFY);
+    unsafe { RegisterSuspendResumeNotification(hrecipient, flags) }
+}
+#[inline]
 pub unsafe fn SetCurrentProcessExplicitAppUserModelID<P0>(appid: P0) -> windows_core::HRESULT
 where
     P0: windows_core::Param<windows_core::PCWSTR>,
 {
     windows_core::link!("shell32.dll" "system" fn SetCurrentProcessExplicitAppUserModelID(appid : windows_core::PCWSTR) -> windows_core::HRESULT);
     unsafe { SetCurrentProcessExplicitAppUserModelID(appid.param().abi()) }
+}
+#[inline]
+pub unsafe fn UnregisterSuspendResumeNotification(handle: HPOWERNOTIFY) -> windows_core::BOOL {
+    windows_core::link!("user32.dll" "system" fn UnregisterSuspendResumeNotification(handle : HPOWERNOTIFY) -> windows_core::BOOL);
+    unsafe { UnregisterSuspendResumeNotification(handle) }
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -261,6 +305,7 @@ pub struct CLIPDATA {
 pub type CLSCTX = u32;
 pub const CLSCTX_ALL: i32 = 23;
 pub const CLSCTX_INPROC_SERVER: CLSCTX = 1;
+pub const CREATE_NO_WINDOW: i32 = 134217728;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union CY {
@@ -325,6 +370,13 @@ pub struct DECIMAL_1_0 {
     pub Lo32: u32,
     pub Mid32: u32,
 }
+pub const DEVICE_NOTIFY_CALLBACK: i32 = 2;
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+    pub Callback: PDEVICE_NOTIFY_CALLBACK_ROUTINE,
+    pub Context: *mut core::ffi::c_void,
+}
 pub const DEVICE_STATE_ACTIVE: i32 = 1;
 pub const DEVICE_STATE_DISABLED: i32 = 2;
 pub const DEVICE_STATE_NOTPRESENT: i32 = 4;
@@ -343,6 +395,12 @@ pub struct FILETIME {
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct HANDLE(pub *mut core::ffi::c_void);
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct HPOWERNOTIFY(pub *mut core::ffi::c_void);
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct HWND(pub *mut core::ffi::c_void);
 windows_core::imp::define_interface!(
     IAudioEndpointVolume,
     IAudioEndpointVolume_Vtbl,
@@ -1325,10 +1383,23 @@ pub struct IStream_Vtbl {
     Stat: usize,
     Clone: usize,
 }
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct LPARAM(pub isize);
 pub type LPSAFEARRAY = *mut SAFEARRAY;
 pub type LPVERSIONEDSTREAM = *mut VERSIONEDSTREAM;
 pub const MMDeviceEnumerator: windows_core::GUID =
     windows_core::GUID::from_u128(0xbcde0395_e52f_467c_8e3d_c4579291692e);
+pub const MUI_LANGUAGE_NAME: i32 = 8;
+pub const PBT_APMRESUMEAUTOMATIC: i32 = 18;
+pub const PBT_APMRESUMESUSPEND: i32 = 7;
+pub type PDEVICE_NOTIFY_CALLBACK_ROUTINE = Option<
+    unsafe extern "system" fn(
+        context: *const core::ffi::c_void,
+        r#type: u32,
+        setting: *const core::ffi::c_void,
+    ) -> u32,
+>;
 pub const PKEY_AudioEndpoint_FormFactor: PROPERTYKEY = PROPERTYKEY {
     fmtid: windows_core::GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
     pid: 0,
@@ -1348,10 +1419,6 @@ pub const PKEY_Device_DeviceDesc: PROPERTYKEY = PROPERTYKEY {
 pub const PKEY_Device_EnumeratorName: PROPERTYKEY = PROPERTYKEY {
     fmtid: windows_core::GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
     pid: 24,
-};
-pub const PKEY_Device_FriendlyName: PROPERTYKEY = PROPERTYKEY {
-    fmtid: windows_core::GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
-    pid: 14,
 };
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1533,6 +1600,7 @@ pub struct SECURITY_ATTRIBUTES {
     pub bInheritHandle: windows_core::BOOL,
 }
 pub const STGM_READ: i32 = 0;
+pub type VARENUM = i32;
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct VARIANT_BOOL(pub i16);
@@ -1545,6 +1613,7 @@ pub struct VERSIONEDSTREAM {
     pub guidVersion: windows_core::GUID,
     pub pStream: core::mem::ManuallyDrop<Option<IStream>>,
 }
+pub const VT_LPWSTR: VARENUM = 31;
 #[repr(C, packed(1))]
 #[derive(Clone, Copy, Default)]
 pub struct WAVEFORMATEX {
@@ -1556,6 +1625,10 @@ pub struct WAVEFORMATEX {
     pub wBitsPerSample: u16,
     pub cbSize: u16,
 }
+pub const WM_CANCELMODE: i32 = 31;
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct WPARAM(pub usize);
 pub const eAll: EDataFlow = 2;
 pub const eCapture: EDataFlow = 1;
 pub const eCommunications: ERole = 2;

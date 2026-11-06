@@ -1,10 +1,11 @@
 use crate::audio::{
     AudioBackend, AudioBackendImpl, AudioDevice, check_and_unmute_device, collect_device_info,
-    enforce_priorities, enforce_volume_lock, migrate_device_ids,
+    enforce_priorities, enforce_volume_lock, transfer_device_settings,
 };
 use crate::config::{PersistentState, save_state};
 use crate::consts::{APP_NAME, APP_UID, CURRENT_VERSION};
-use crate::notification::{NotificationThrottler, log_and_notify_error};
+use crate::i18n::t;
+use crate::notification::{NotificationThrottler, notify_error};
 use crate::types::{
     DeviceChangeSource, DeviceFingerprint, DeviceId, DeviceType, TemporaryPriorities, UserEvent,
     VolumeChangedEvent, VolumeScalar,
@@ -31,6 +32,7 @@ pub struct AppState {
     pub temporary_priorities: TemporaryPriorities,
     pub update_info: Option<UpdateInfo>,
     pub update_check_in_progress: bool,
+    pub update_download_in_progress: bool,
     pub tray_icon: Option<tray_icon::TrayIcon>,
     pub backend: AudioBackendImpl,
     pub device_cache: HashMap<DeviceId, (String, DeviceType, Option<DeviceFingerprint>)>,
@@ -43,7 +45,6 @@ pub struct EventLoopRefs<'a> {
     pub auto_launch: &'a AutoLaunch,
     pub auto_launch_check_item: &'a CheckMenuItem,
     pub check_updates_on_launch_item: &'a CheckMenuItem,
-    pub notify_on_device_migration_item: &'a CheckMenuItem,
     pub quit_item: &'a MenuItem,
     pub tray_menu: &'a Menu,
     pub output_devices_heading_item: &'a MenuItem,
@@ -106,8 +107,8 @@ impl AppState {
         }
     }
 
-    pub fn migrate_device_ids_if_needed(&mut self) {
-        let result = migrate_device_ids(
+    pub fn transfer_device_settings_if_needed(&mut self) {
+        let result = transfer_device_settings(
             &self.backend,
             &mut self.persistent_state,
             &mut self.temporary_priorities,
@@ -116,18 +117,22 @@ impl AppState {
 
         if result.persistent_changed {
             if let Err(e) = save_state(&self.persistent_state) {
-                log_and_notify_error("保存状态失败", &format!("设备迁移后无法保存状态：{e:#}"));
+                notify_error!(
+                    "save-state-failed-title",
+                    "save-state-after-update-failed",
+                    error = format!("{e:#}")
+                );
             } else {
-                log::info!("Saved state after device migration");
+                log::info!("Saved state after device update");
             }
         }
 
-        if self.persistent_state.notify_on_device_migration {
-            for name in result.migrated_device_names {
+        if self.persistent_state.notify_on_settings_transfer {
+            for name in result.transferred_device_names {
                 self.notification_throttler.send_if_not_throttled(
-                    &format!("migration_{name}"),
-                    "设备设置已迁移",
-                    &format!("「{name}」的设置已迁移到它的新连接。"),
+                    &format!("transfer_{name}"),
+                    &t!("settings-transferred-title"),
+                    &t!("settings-transferred", device = name.as_str()),
                 );
             }
         }
@@ -261,14 +266,21 @@ impl AppState {
         let description = source.description(|id| self.get_device_display_name(id));
         log::info!("Audio event ({description}): updating devices and enforcing settings...");
 
-        self.backend.configure_presence_monitoring(
-            self.persistent_state
-                .devices_iter()
-                .any(|(_, settings)| !settings.presence_source.is_windows()),
-        );
+        self.transfer_device_settings_if_needed();
+        let device_info = collect_device_info(&self.backend);
+        let presence_devices: Vec<_> = if self.persistent_state.skip_disconnected_wireless_headsets
+        {
+            device_info
+                .iter()
+                .filter_map(|(_, _, _, fingerprint)| fingerprint.as_ref()?.usb_vid_pid)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.backend
+            .configure_presence_monitoring(&presence_devices);
 
-        self.migrate_device_ids_if_needed();
-        for (device_id, new_name, device_type, fingerprint) in collect_device_info(&self.backend) {
+        for (device_id, new_name, device_type, fingerprint) in device_info {
             self.device_cache.insert(
                 device_id.clone(),
                 (new_name.clone(), device_type, fingerprint.clone()),
@@ -306,7 +318,7 @@ impl AppState {
 
         self.update_check_in_progress = true;
         let proxy = proxy.clone();
-        std::thread::spawn(move || {
+        smol::unblock(move || {
             let result = update::fetch_update_info().map_err(|e| format!("{e:#}"));
             if let Err(e) = proxy.send_event(UserEvent::UpdateCheckCompleted {
                 manual_request,
@@ -314,7 +326,8 @@ impl AppState {
             }) {
                 log::warn!("Failed to send update check result: {e:#}");
             }
-        });
+        })
+        .detach();
     }
 
     pub fn handle_update_check_completed(
@@ -327,9 +340,54 @@ impl AppState {
         self.update_info = result.ok().flatten();
     }
 
+    fn start_update_download(&mut self, info: UpdateInfo, proxy: &EventLoopProxy<UserEvent>) {
+        if self.update_download_in_progress {
+            log::info!("Update download already in progress");
+            return;
+        }
+
+        self.update_download_in_progress = true;
+        let proxy = proxy.clone();
+        smol::unblock(move || {
+            let result = update::download_update(&info).map_err(|e| format!("{e:#}"));
+            if let Err(e) = proxy.send_event(UserEvent::UpdateDownloadCompleted(result)) {
+                log::warn!("Failed to send update download result: {e:#}");
+            }
+        })
+        .detach();
+    }
+
+    pub fn handle_update_download_completed(
+        &mut self,
+        result: Result<(), String>,
+        control_flow: &mut ControlFlow,
+    ) {
+        self.update_download_in_progress = false;
+        // Launched here rather than in the download task, so the app is guaranteed
+        // to exit right after, even if the tray menu was open when the download ended.
+        let result =
+            result.and_then(|()| update::launch_post_update_script().map_err(|e| format!("{e:#}")));
+        match result {
+            Ok(()) => self.begin_exit(control_flow),
+            Err(e) => {
+                notify_error!("update-failed-title", "update-failed", error = e.as_str());
+            }
+        }
+    }
+
+    fn begin_exit(&mut self, control_flow: &mut ControlFlow) {
+        self.tray_hwnd.store(0, Ordering::SeqCst);
+        self.tray_icon.take();
+        *control_flow = ControlFlow::Exit;
+    }
+
     pub fn handle_configuration_changed(&mut self, proxy: &EventLoopProxy<UserEvent>) {
         if let Err(e) = save_state(&self.persistent_state) {
-            log_and_notify_error("保存状态失败", &format!("无法保存状态：{e:#}"));
+            notify_error!(
+                "save-state-failed-title",
+                "save-state-failed",
+                error = format!("{e:#}")
+            );
             return;
         }
         log::info!(
@@ -351,9 +409,7 @@ impl AppState {
     ) {
         self.reopen_menu.store(false, Ordering::SeqCst);
         if event.id == refs.quit_item.id() {
-            self.tray_hwnd.store(0, Ordering::SeqCst);
-            self.tray_icon.take();
-            *control_flow = ControlFlow::Exit;
+            self.begin_exit(control_flow);
         } else if let Some(menu_info) = self.menu_id_map.get(&event.id) {
             let mut ctx = MenuEventContext {
                 tray_menu: refs.tray_menu,
@@ -377,16 +433,9 @@ impl AppState {
                         log::warn!("Failed to send ConfigurationChanged event: {e:#}");
                     }
                 }
-                MenuEventResult::UpdatePerform(info) => match update::install_update(&info) {
-                    Ok(()) => {
-                        self.tray_hwnd.store(0, Ordering::SeqCst);
-                        self.tray_icon.take();
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    Err(e) => {
-                        log_and_notify_error("更新失败", &format!("更新失败：{e:#}"));
-                    }
-                },
+                MenuEventResult::UpdatePerform(info) => {
+                    self.start_update_download(info, proxy);
+                }
                 MenuEventResult::UpdateCheck => {
                     self.start_update_check(true, proxy);
                 }
@@ -397,9 +446,10 @@ impl AppState {
                         refs.auto_launch.disable()
                     };
                     if let Err(e) = result {
-                        log_and_notify_error(
-                            "自动启动切换失败",
-                            &format!("无法切换自动启动：{e:#}"),
+                        notify_error!(
+                            "auto-launch-failed-title",
+                            "auto-launch-failed",
+                            error = format!("{e:#}")
                         );
                     }
                 }
@@ -415,20 +465,16 @@ impl AppState {
         proxy: &EventLoopProxy<UserEvent>,
     ) {
         let tooltip = format!("{APP_NAME} v{CURRENT_VERSION}");
-        let tray_guid = u128::from_str_radix(&APP_UID.replace('-', ""), 16)
-            .expect("APP_UID must be a valid UUID");
         match TrayIconBuilder::new()
             .with_menu(Box::new(tray_menu.clone()))
             .with_tooltip(&tooltip)
             .with_icon(unlocked_icon.clone())
             .with_id(APP_UID)
-            .with_guid(tray_guid)
             .with_menu_on_left_click(false)
             .with_menu_on_right_click(false)
             .build()
         {
             Ok(icon) => {
-                #[cfg(target_os = "windows")]
                 self.tray_hwnd
                     .store(icon.window_handle() as isize, Ordering::SeqCst);
                 self.tray_icon = Some(icon);
@@ -455,6 +501,7 @@ impl AppState {
                 false
             }),
             update_info: &self.update_info,
+            update_download_in_progress: self.update_download_in_progress,
         };
         match rebuild_tray_menu(
             refs.tray_menu,
@@ -462,7 +509,6 @@ impl AppState {
             &TrayMenuItems {
                 auto_launch_check: refs.auto_launch_check_item,
                 check_updates_on_launch: refs.check_updates_on_launch_item,
-                notify_on_device_migration: refs.notify_on_device_migration_item,
                 quit: refs.quit_item,
                 output_devices_heading: refs.output_devices_heading_item,
                 input_devices_heading: refs.input_devices_heading_item,
@@ -472,7 +518,11 @@ impl AppState {
                 self.menu_id_map = map;
             }
             Err(e) => {
-                log_and_notify_error("托盘菜单重建失败", &format!("无法重建托盘菜单：{e:#}"));
+                notify_error!(
+                    "rebuild-menu-failed-title",
+                    "rebuild-menu-failed",
+                    error = format!("{e:#}")
+                );
             }
         }
     }

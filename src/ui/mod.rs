@@ -4,7 +4,7 @@ mod menu_builder;
 pub use event_handler::{MenuEventContext, MenuEventResult, handle_menu_event};
 pub use menu_builder::{MenuContext, TrayMenuItems, rebuild_tray_menu};
 
-use crate::types::{DeviceId, DeviceType, PresenceSource, PriorityKind};
+use crate::types::{DeviceId, DeviceType, PriorityKind};
 use std::collections::HashMap;
 use tray_icon::menu::{Menu, MenuId, MenuItemKind};
 
@@ -25,7 +25,6 @@ pub enum DeviceAction {
     MovePriorityToTop(PriorityKind),
     MovePriorityToBottom(PriorityKind),
     SetTemporaryPriority(PriorityKind),
-    SetPresenceSource(PresenceSource),
     OpenProperties,
     OpenSettings,
 }
@@ -46,7 +45,10 @@ pub enum AppAction {
     OpenAppDirectory,
     ToggleAutoLaunch,
     ToggleCheckUpdatesOnLaunch,
-    ToggleNotifyOnDeviceMigration,
+    ToggleTransferDeviceSettings,
+    ToggleNotifyOnSettingsTransfer,
+    ToggleTransferDeviceNameAndIcon,
+    ToggleSkipDisconnectedWirelessHeadsets,
 }
 
 #[derive(Debug)]
@@ -63,17 +65,18 @@ pub enum MenuAction {
     App(AppAction),
 }
 
-#[cfg(target_os = "windows")]
 pub fn dismiss_tray_menu(hwnd: isize) {
-    const WM_CANCELMODE: u32 = 0x001F;
-    windows_core::link!("user32.dll" "system" fn PostMessageW(hwnd: *mut std::ffi::c_void, msg: u32, wparam: usize, lparam: isize) -> windows_core::BOOL);
+    use crate::bindings::{HWND, LPARAM, PostMessageW, WM_CANCELMODE, WPARAM};
+    // SAFETY: PostMessageW takes the handle by value and reports an invalid one as an error.
     unsafe {
-        let _ = PostMessageW(hwnd as *mut std::ffi::c_void, WM_CANCELMODE, 0, 0);
+        let _ = PostMessageW(
+            Some(HWND(hwnd as *mut std::ffi::c_void)),
+            WM_CANCELMODE as u32,
+            WPARAM(0),
+            LPARAM(0),
+        );
     }
 }
-
-#[cfg(not(target_os = "windows"))]
-pub fn dismiss_tray_menu(_hwnd: isize) {}
 
 #[derive(Debug)]
 pub struct MenuItemInfo {

@@ -2,9 +2,10 @@ use super::{AppAction, DeviceAction, MenuAction, MenuItemInfo, PreferenceAction}
 use crate::audio::AudioBackend;
 use crate::config::PersistentState;
 use crate::consts::GITHUB_REPO_URL;
-use crate::notification::log_and_notify_error;
+use crate::notification::notify_error;
 use crate::platform::{
-    open_device_settings, open_sound_control_panel, open_sound_settings, open_volume_mixer,
+    open_device_properties, open_device_settings, open_sound_control_panel, open_sound_settings,
+    open_volume_mixer,
 };
 use crate::types::{DeviceId, DeviceType, PriorityKind, TemporaryPriorities};
 use crate::update::UpdateInfo;
@@ -85,9 +86,10 @@ fn apply_device_lock_toggle(
                     device_settings.volume_lock.target_percent = percent;
                     device_settings.volume_lock.is_locked = true;
                 } else {
-                    log_and_notify_error(
-                        "音量锁定失败",
-                        &format!("无法获取设备 {device_name} 的音量，无法锁定。"),
+                    notify_error!(
+                        "lock-volume-failed-title",
+                        "lock-volume-failed",
+                        device = device_name
                     );
                     device_settings.volume_lock.is_locked = false;
                 }
@@ -319,16 +321,9 @@ fn handle_device_event(
             );
             MenuEventResult::DevicesChanged
         }
-        DeviceAction::SetPresenceSource(source) => {
-            ctx.persistent_state
-                .ensure_device_settings(device_id.clone(), device_name.to_string(), device_type)
-                .presence_source = *source;
-            ctx.persistent_state.remove_device_if_unused(device_id);
-            MenuEventResult::SaveConfig
-        }
         DeviceAction::OpenProperties => {
-            if let Err(e) = open_sound_control_panel(sound_panel_tab(device_type)) {
-                log::error!("Failed to open sound control panel: {e:#}");
+            if let Err(e) = open_device_properties(device_id) {
+                log::error!("Failed to open device properties: {e:#}");
             }
             MenuEventResult::NoChange
         }
@@ -412,10 +407,28 @@ fn handle_app_event(
                 ctx.persistent_state.check_updates_on_launch = checked;
             })
         }
-        AppAction::ToggleNotifyOnDeviceMigration => {
+        AppAction::ToggleTransferDeviceSettings => {
             with_check_state(ctx.tray_menu, &event.id, |checked| {
-                log::info!("User toggled 'Notify on device migration' to {checked}");
-                ctx.persistent_state.notify_on_device_migration = checked;
+                log::info!("User toggled 'Automatically transfer device settings' to {checked}");
+                ctx.persistent_state.transfer_device_settings = checked;
+            })
+        }
+        AppAction::ToggleNotifyOnSettingsTransfer => {
+            with_check_state(ctx.tray_menu, &event.id, |checked| {
+                log::info!("User toggled 'Notify on settings transfer' to {checked}");
+                ctx.persistent_state.notify_on_settings_transfer = checked;
+            })
+        }
+        AppAction::ToggleTransferDeviceNameAndIcon => {
+            with_check_state(ctx.tray_menu, &event.id, |checked| {
+                log::info!("User toggled 'Also transfer device name and icon' to {checked}");
+                ctx.persistent_state.transfer_device_name_and_icon = checked;
+            })
+        }
+        AppAction::ToggleSkipDisconnectedWirelessHeadsets => {
+            with_check_state(ctx.tray_menu, &event.id, |checked| {
+                log::info!("User toggled 'Skip disconnected wireless headsets' to {checked}");
+                ctx.persistent_state.skip_disconnected_wireless_headsets = checked;
             })
         }
         AppAction::OpenAppDirectory => {

@@ -1,21 +1,19 @@
-#![cfg_attr(
-    all(target_os = "windows", not(debug_assertions),),
-    windows_subsystem = "windows"
-)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod audio;
-#[cfg(target_os = "windows")]
 #[allow(
     dead_code,
     non_camel_case_types,
     non_snake_case,
     non_upper_case_globals,
-    clippy::all
+    clippy::all,
+    reason = "generated code"
 )]
 mod bindings;
 mod config;
 mod consts;
+mod i18n;
 mod notification;
 mod platform;
 mod types;
@@ -28,6 +26,7 @@ use crate::audio::AudioBackend;
 use crate::audio::AudioBackendImpl;
 use crate::config::load_state;
 use crate::consts::{APP_NAME, APP_UID, LOG_FILE_NAME};
+use crate::i18n::{t, t_en};
 use crate::notification::NotificationThrottler;
 use crate::platform::{
     NotificationDuration, SingleInstanceGuard, init_platform, is_directory_writable,
@@ -93,17 +92,18 @@ fn setup_logging(executable_directory: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ensure_writable_directory(executable_directory: &std::path::Path) -> anyhow::Result<()> {
-    if !is_directory_writable(executable_directory) {
-        let error_title = "Volume Locker 目录不可写";
-        let error_message = format!(
-            "请将 Volume Locker 移动到可写目录，或修复 '{}' 的权限。",
-            executable_directory.display(),
-        );
-        let _ = send_notification(error_title, &error_message, NotificationDuration::Long);
-        anyhow::bail!("{error_title}: {error_message}");
-    }
-    Ok(())
+fn notify_directory_not_writable(executable_directory: &std::path::Path) -> anyhow::Error {
+    let path = executable_directory.display().to_string();
+    let _ = send_notification(
+        &t!("directory-not-writable-title"),
+        &t!("directory-not-writable", path = path.as_str()),
+        NotificationDuration::Long,
+    );
+    anyhow::anyhow!(
+        "{}: {}",
+        t_en!("directory-not-writable-title"),
+        t_en!("directory-not-writable", path = path.as_str())
+    )
 }
 
 fn wire_event_proxies(event_loop: &tao::event_loop::EventLoop<UserEvent>) {
@@ -135,27 +135,36 @@ fn create_auto_launch() -> anyhow::Result<AutoLaunch> {
 
 fn run() -> anyhow::Result<()> {
     let executable_directory = get_executable_directory()?;
-    setup_logging(&executable_directory)?;
-
-    let com_token = init_platform(&executable_directory)?;
-    ensure_writable_directory(&executable_directory)?;
+    // Comes first because setup_logging truncates the log a running instance is writing to.
     let _instance =
         SingleInstanceGuard::acquire(APP_UID).context("failed to acquire single instance lock")?;
+
+    // The log file needs a writable location, and the notification needs the AUMID that
+    // init_platform registers, so the check has to wrap both.
+    let directory_usable = is_directory_writable(&executable_directory)
+        && setup_logging(&executable_directory).is_ok();
+    // After logging, so the chosen language is logged. Before the check below, because its
+    // notification is translated.
+    i18n::init();
+
+    let com_token = init_platform(&executable_directory)?;
+    if !directory_usable {
+        return Err(notify_directory_not_writable(&executable_directory));
+    }
+    update::remove_leftover_download();
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     wire_event_proxies(&event_loop);
 
     let auto_launch = create_auto_launch()?;
 
-    let output_devices_heading_item = MenuItem::new("输出设备", false, None);
-    let input_devices_heading_item = MenuItem::new("输入设备", false, None);
+    let output_devices_heading_item = MenuItem::new(t!("output-devices"), false, None);
+    let input_devices_heading_item = MenuItem::new(t!("input-devices"), false, None);
     let auto_launch_check_item: CheckMenuItem =
-        CheckMenuItem::new("登录时自动启动", true, false, None);
+        CheckMenuItem::new(t!("auto-launch"), true, false, None);
     let check_updates_on_launch_item: CheckMenuItem =
-        CheckMenuItem::new("启动时检查更新", true, false, None);
-    let notify_on_device_migration_item: CheckMenuItem =
-        CheckMenuItem::new("设备迁移时通知", true, false, None);
-    let quit_item = MenuItem::new("退出", true, None);
+        CheckMenuItem::new(t!("check-updates-on-launch"), true, false, None);
+    let quit_item = MenuItem::new(t!("quit"), true, None);
 
     let tray_menu = Menu::new();
     // At least one item must be added to the menu on initialization, otherwise
@@ -169,7 +178,6 @@ fn run() -> anyhow::Result<()> {
     let locked_icon = tray_icon::Icon::from_resource_name("volume-locked-icon", None)
         .context("failed to load locked icon")?;
 
-    #[cfg(target_os = "windows")]
     let backend =
         AudioBackendImpl::new(&com_token).context("failed to initialize audio backend")?;
 
@@ -219,6 +227,7 @@ fn run() -> anyhow::Result<()> {
         temporary_priorities: TemporaryPriorities::default(),
         update_info: None,
         update_check_in_progress: false,
+        update_download_in_progress: false,
         tray_icon: None,
         backend,
         device_cache: std::collections::HashMap::new(),
@@ -234,7 +243,6 @@ fn run() -> anyhow::Result<()> {
             auto_launch: &auto_launch,
             auto_launch_check_item: &auto_launch_check_item,
             check_updates_on_launch_item: &check_updates_on_launch_item,
-            notify_on_device_migration_item: &notify_on_device_migration_item,
             quit_item: &quit_item,
             tray_menu: &tray_menu,
             output_devices_heading_item: &output_devices_heading_item,
@@ -285,6 +293,10 @@ fn run() -> anyhow::Result<()> {
                 result,
             }) => {
                 app.handle_update_check_completed(manual_request, result);
+            }
+
+            Event::UserEvent(UserEvent::UpdateDownloadCompleted(result)) => {
+                app.handle_update_download_completed(result, control_flow);
             }
 
             _ => {}

@@ -1,6 +1,7 @@
 use super::{DeviceDisplayInfo, append_action_item, format_device_menu_label, register_menu_item};
 use crate::audio::{AudioBackend, AudioDevice};
 use crate::config::PersistentState;
+use crate::i18n::t;
 use crate::types::DeviceType;
 use crate::ui::{DeviceAction, MenuAction, MenuIdMap, PreferenceAction};
 use tray_icon::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -45,16 +46,17 @@ pub fn build_device_submenu(
 
     let submenu = Submenu::new(&label, true);
 
-    let volume_lock_item = CheckMenuItem::new("锁定音量", true, is_volume_locked, None);
+    let volume_lock_item =
+        CheckMenuItem::new(t!("keep-volume-locked"), true, is_volume_locked, None);
     let volume_notify_item = CheckMenuItem::new(
-        "音量恢复时通知",
+        t!("notify-on-volume-restore"),
         is_volume_locked,
         notify_on_volume_lock,
         None,
     );
-    let unmute_lock_item = CheckMenuItem::new("保持不静音", true, is_unmute_locked, None);
+    let unmute_lock_item = CheckMenuItem::new(t!("keep-unmuted"), true, is_unmute_locked, None);
     let unmute_notify_item = CheckMenuItem::new(
-        "取消静音时通知",
+        t!("notify-on-unmute"),
         is_unmute_locked,
         notify_on_unmute_lock,
         None,
@@ -81,23 +83,14 @@ pub fn build_device_submenu(
     submenu.append(&unmute_notify_item)?;
     submenu.append(&PredefinedMenuItem::separator())?;
 
-    let properties_item = MenuItem::new("属性...", true, None);
+    let properties_item = MenuItem::new(t!("device-properties"), true, None);
     register(properties_item.id().clone(), DeviceAction::OpenProperties);
     submenu.append(&properties_item)?;
 
-    let settings_item = MenuItem::new("设置...", true, None);
+    let settings_item = MenuItem::new(t!("device-settings"), true, None);
     register(settings_item.id().clone(), DeviceAction::OpenSettings);
     submenu.append(&settings_item)?;
 
-    submenu.append(&PredefinedMenuItem::separator())?;
-    super::presence_section::append_presence_settings(
-        &submenu,
-        device_id,
-        &name,
-        device_type,
-        persistent_state,
-        map,
-    )?;
     Ok(submenu)
 }
 
@@ -122,13 +115,13 @@ pub fn append_device_list_to_menu(
     }
 
     let properties_label = match device_type {
-        DeviceType::Output => "播放设备...",
-        DeviceType::Input => "录制设备...",
+        DeviceType::Output => t!("playback-devices"),
+        DeviceType::Input => t!("recording-devices"),
     };
     append_action_item(
         tray_menu,
         map,
-        properties_label,
+        &properties_label,
         MenuAction::Preference {
             device_type,
             action: PreferenceAction::OpenDevicesList,
@@ -142,8 +135,6 @@ pub fn append_device_list_to_menu(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
-
     use super::*;
     use crate::audio::tests::MockDevice;
 
@@ -156,9 +147,8 @@ mod tests {
         let submenu = build_device_submenu(&device, DeviceType::Output, &state, &mut map)
             .expect("build_device_submenu should succeed");
 
-        // Existing actions plus availability settings: VolumeLock, VolumeLockNotify, UnmuteLock,
-        // UnmuteLockNotify, OpenProperties, OpenSettings
-        assert_eq!(map.len(), 8);
+        // Volume, mute, properties, and device-settings actions.
+        assert_eq!(map.len(), 6);
         assert_eq!(submenu.text(), "Speakers · 100%");
     }
 

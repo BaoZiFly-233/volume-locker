@@ -1,14 +1,14 @@
 mod device_section;
-mod presence_section;
 mod priority_section;
 
 use super::{AppAction, DeviceAction, MenuAction, MenuItemInfo};
 use crate::audio::AudioBackend;
 use crate::config::PersistentState;
+use crate::i18n::{t, t_en};
 use crate::types::{DeviceId, DeviceType, TemporaryPriorities, VolumePercent};
 use crate::update::UpdateInfo;
 use std::collections::HashMap;
-use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
 use super::MenuIdMap;
 
@@ -59,10 +59,20 @@ fn register_menu_item(
     name: &str,
     device_type: DeviceType,
 ) {
+    // This name goes to the logs. The Follow entry's label is translated app text, so it needs an
+    // English name, unlike real devices, whose names come from Windows.
+    let name = if device_id.is_main_priority() {
+        match device_type {
+            DeviceType::Output => t_en!("follow-output-device-priority"),
+            DeviceType::Input => t_en!("follow-input-device-priority"),
+        }
+    } else {
+        name.to_string()
+    };
     map.insert(
         menu_id,
         MenuItemInfo {
-            name: name.to_string(),
+            name,
             action: MenuAction::Device {
                 device_id: device_id.clone(),
                 device_type,
@@ -93,7 +103,6 @@ fn lookup_device_name(
 pub struct TrayMenuItems<'a> {
     pub auto_launch_check: &'a CheckMenuItem,
     pub check_updates_on_launch: &'a CheckMenuItem,
-    pub notify_on_device_migration: &'a CheckMenuItem,
     pub quit: &'a MenuItem,
     pub output_devices_heading: &'a MenuItem,
     pub input_devices_heading: &'a MenuItem,
@@ -105,6 +114,7 @@ pub struct MenuContext<'a, B: AudioBackend> {
     pub temporary_priorities: &'a TemporaryPriorities,
     pub auto_launch_enabled: bool,
     pub update_info: &'a Option<UpdateInfo>,
+    pub update_download_in_progress: bool,
 }
 
 pub fn rebuild_tray_menu(
@@ -134,13 +144,13 @@ pub fn rebuild_tray_menu(
     append_action_item(
         tray_menu,
         &mut map,
-        "声音设置...",
+        &t!("sound-settings"),
         MenuAction::App(AppAction::OpenSoundSettings),
     )?;
     append_action_item(
         tray_menu,
         &mut map,
-        "音量合成器...",
+        &t!("volume-mixer"),
         MenuAction::App(AppAction::OpenVolumeMixer),
     )?;
     tray_menu.append(&PredefinedMenuItem::separator())?;
@@ -171,7 +181,13 @@ pub fn rebuild_tray_menu(
         &mut map,
     )?;
 
-    append_footer_section(tray_menu, &mut map, ctx.update_info.as_ref(), items)?;
+    append_footer_section(
+        tray_menu,
+        &mut map,
+        ctx.update_info.as_ref(),
+        ctx.update_download_in_progress,
+        items,
+    )?;
 
     Ok(map)
 }
@@ -183,13 +199,58 @@ fn append_preferences_section(
     items: &TrayMenuItems,
     map: &mut MenuIdMap,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("首选项", false, None))?;
+    tray_menu.append(&MenuItem::new(t!("preferences"), false, None))?;
+
+    let settings_transfer = Submenu::new(t!("settings-transfer"), true);
+    for (label, checked, action) in [
+        (
+            t!("transfer-device-settings"),
+            persistent_state.transfer_device_settings,
+            AppAction::ToggleTransferDeviceSettings,
+        ),
+        (
+            t!("transfer-device-name-and-icon"),
+            persistent_state.transfer_device_name_and_icon,
+            AppAction::ToggleTransferDeviceNameAndIcon,
+        ),
+        (
+            t!("notify-on-settings-transfer"),
+            persistent_state.notify_on_settings_transfer,
+            AppAction::ToggleNotifyOnSettingsTransfer,
+        ),
+    ] {
+        let item = CheckMenuItem::new(&label, true, checked, None);
+        map.insert(
+            item.id().clone(),
+            MenuItemInfo {
+                name: label,
+                action: MenuAction::App(action),
+            },
+        );
+        settings_transfer.append(&item)?;
+    }
+    tray_menu.append(&settings_transfer)?;
+
+    let skip_disconnected_wireless_headsets = CheckMenuItem::new(
+        t!("skip-disconnected-wireless-headsets"),
+        true,
+        persistent_state.skip_disconnected_wireless_headsets,
+        None,
+    );
+    map.insert(
+        skip_disconnected_wireless_headsets.id().clone(),
+        MenuItemInfo {
+            name: "Skip disconnected wireless headsets".to_string(),
+            action: MenuAction::App(AppAction::ToggleSkipDisconnectedWirelessHeadsets),
+        },
+    );
+    tray_menu.append(&skip_disconnected_wireless_headsets)?;
 
     items.auto_launch_check.set_checked(auto_launch_enabled);
     map.insert(
         items.auto_launch_check.id().clone(),
         MenuItemInfo {
-            name: "登录时自动启动".to_string(),
+            name: "Auto-launch".to_string(),
             action: MenuAction::App(AppAction::ToggleAutoLaunch),
         },
     );
@@ -201,23 +262,11 @@ fn append_preferences_section(
     map.insert(
         items.check_updates_on_launch.id().clone(),
         MenuItemInfo {
-            name: "启动时检查更新".to_string(),
+            name: "Check updates on launch".to_string(),
             action: MenuAction::App(AppAction::ToggleCheckUpdatesOnLaunch),
         },
     );
     tray_menu.append(items.check_updates_on_launch)?;
-
-    items
-        .notify_on_device_migration
-        .set_checked(persistent_state.notify_on_device_migration);
-    map.insert(
-        items.notify_on_device_migration.id().clone(),
-        MenuItemInfo {
-            name: "设备迁移时通知".to_string(),
-            action: MenuAction::App(AppAction::ToggleNotifyOnDeviceMigration),
-        },
-    );
-    tray_menu.append(items.notify_on_device_migration)?;
     tray_menu.append(&PredefinedMenuItem::separator())?;
 
     Ok(())
@@ -227,14 +276,15 @@ fn append_footer_section(
     tray_menu: &Menu,
     map: &mut MenuIdMap,
     update_info: Option<&UpdateInfo>,
+    update_download_in_progress: bool,
     items: &TrayMenuItems,
 ) -> anyhow::Result<()> {
-    tray_menu.append(&MenuItem::new("疑难解答", false, None))?;
+    tray_menu.append(&MenuItem::new(t!("troubleshooting"), false, None))?;
 
     append_action_item(
         tray_menu,
         map,
-        "打开应用文件夹...",
+        &t!("open-app-folder"),
         MenuAction::App(AppAction::OpenAppDirectory),
     )?;
 
@@ -247,15 +297,19 @@ fn append_footer_section(
         MenuAction::App(AppAction::OpenGitHubRepo),
     )?;
 
-    let (label, action) = match update_info {
-        Some(info) => (
-            format!("更新到 {}...", info.latest_version),
-            AppAction::PerformUpdate,
-        ),
-        None => ("检查更新".to_string(), AppAction::CheckForUpdates),
-    };
+    if update_download_in_progress {
+        tray_menu.append(&MenuItem::new(t!("downloading-update"), false, None))?;
+    } else {
+        let (label, action) = match update_info {
+            Some(info) => (
+                t!("update-to-version", version = info.latest_version.as_str()),
+                AppAction::PerformUpdate,
+            ),
+            None => (t!("check-for-updates"), AppAction::CheckForUpdates),
+        };
 
-    append_action_item(tray_menu, map, &label, MenuAction::App(action))?;
+        append_action_item(tray_menu, map, &label, MenuAction::App(action))?;
+    }
 
     tray_menu.append(&PredefinedMenuItem::separator())?;
     tray_menu.append(items.quit)?;
