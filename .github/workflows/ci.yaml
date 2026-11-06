@@ -62,6 +62,15 @@ jobs:
 
       - run: mise run build
 
+      # 每次构建都留一份产物：没有打 tag 时也能下载 exe 做实机验证，
+      # 不用为了看一眼界面就先发一个 Release。
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VolumeLocker-${{ github.sha }}
+          path: target/release/VolumeLocker.exe
+          if-no-files-found: error
+
       # -zh 标签同样发布，产物版本号为基础 semver
       - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
